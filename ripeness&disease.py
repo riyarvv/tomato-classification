@@ -10,7 +10,7 @@ print("✅ Using tflite_runtime (Raspberry Pi 5)")
 # =============================
 # Initialize TFLite interpreter
 # =============================
-MODEL_PATH = "tomato_model.tflite"  
+MODEL_PATH = "tomato_model_pi.tflite"  
 interpreter = Interpreter(model_path=MODEL_PATH)
 interpreter.allocate_tensors()
 
