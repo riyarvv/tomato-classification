@@ -4,15 +4,8 @@ import numpy as np
 # =============================
 # Load TFLite model
 # =============================
-try:
-    # Raspberry Pi
-    from tflite_runtime.interpreter import Interpreter
-    print("✅ Using tflite_runtime (Raspberry Pi)")
-except ImportError:
-    # Windows / Laptop
-    import tensorflow as tf
-    Interpreter = tf.lite.Interpreter
-    print("✅ Using TensorFlow Lite (Windows)")
+from tflite_runtime.interpreter import Interpreter
+print("✅ Using tflite_runtime (Raspberry Pi 5)")
 
 # =============================
 # Initialize TFLite interpreter
@@ -122,3 +115,4 @@ while True:
 
 cap.release()
 cv2.destroyAllWindows()
+
