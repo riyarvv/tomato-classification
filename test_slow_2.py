@@ -16,11 +16,14 @@ pca.frequency = 50
 BASE, SHOULDER, ELBOW, WRIST, WRIST_ROTATE, GRIPPER = 0, 1, 2, 3, 4, 5
 current_angles = {i: 90 for i in range(6)}
 
-def set_servo_angle_instant(channel, angle):
-    angle = max(0, min(180, angle)) # Global hardware safety
-    pulse = int(4096 * (0.5 + angle / 180 * 2.0) / 20)
-    pca.channels[channel].duty_cycle = pulse
-    current_angles[channel] = angle
+def set_servo_angle(channel, angle):
+    angle = max(0, min(180, angle))
+    # Convert 0-180 degrees to 16-bit duty cycle (approx 5% to 10% of 65535)
+    # Most servos: 0.5ms (3276) to 2.5ms (16384)
+    min_duty = 1638  # 0.5ms at 50Hz
+    max_duty = 8192  # 2.5ms at 50Hz
+    duty = int(min_duty + (angle / 180) * (max_duty - min_duty))
+    pca.channels[channel].duty_cycle = duty
 
 def move_servo_slow(channel, target_angle, speed=0.05):
     start_angle = int(current_angles[channel])
