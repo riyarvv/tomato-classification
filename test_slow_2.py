@@ -2,76 +2,69 @@ import time
 import board
 import busio
 from adafruit_pca9685 import PCA9685
+from adafruit_motor import servo
 
 # =============================
-# PCA9685 Initialization
+# INITIALIZATION
 # =============================
 i2c = busio.I2C(board.SCL, board.SDA)
 pca = PCA9685(i2c)
-pca.frequency = 50   
+pca.frequency = 50
+
+# Setup 6 servos using the proper library helper
+# This library automatically handles the 16-bit duty cycle math
+servos = []
+for i in range(6):
+    # Adjust min_pulse and max_pulse if your servos don't reach full range
+    s = servo.Servo(pca.channels[i], min_pulse=500, max_pulse=2500)
+    servos.append(s)
 
 # =============================
-# Servo Configuration
+# SLOW MOVEMENT FUNCTION
 # =============================
-BASE, SHOULDER, ELBOW, WRIST, WRIST_ROTATE, GRIPPER = 0, 1, 2, 3, 4, 5
-current_angles = {i: 90 for i in range(6)}
+def move_slow(channel_id, target_angle, speed=0.05):
+    """
+    Moves a servo slowly.
+    speed: delay in seconds between each degree.
+    """
+    # Get the starting angle (default to 90 if unknown)
+    current = servos[channel_id].angle
+    if current is None: 
+        current = 90
+        servos[channel_id].angle = 90
+    
+    start_angle = int(current)
+    target_angle = int(max(0, min(180, target_angle))) # Clamp to safety
+    
+    if start_angle == target_angle:
+        return
 
-def set_servo_angle(channel, angle):
-    angle = max(0, min(180, angle))
-    # Convert 0-180 degrees to 16-bit duty cycle (approx 5% to 10% of 65535)
-    # Most servos: 0.5ms (3276) to 2.5ms (16384)
-    min_duty = 1638  # 0.5ms at 50Hz
-    max_duty = 8192  # 2.5ms at 50Hz
-    duty = int(min_duty + (angle / 180) * (max_duty - min_duty))
-    pca.channels[channel].duty_cycle = duty
-
-def move_servo_slow(channel, target_angle, speed=0.05):
-    start_angle = int(current_angles[channel])
     step = 1 if target_angle > start_angle else -1
-    for angle in range(start_angle, int(target_angle) + step, step):
-        set_servo_angle_instant(channel, angle)
+    
+    print(f"Moving Channel {channel_id} to {target_angle}...")
+    
+    for angle in range(start_angle, target_angle + step, step):
+        servos[channel_id].angle = angle
         time.sleep(speed)
 
 # =============================
-# Calibration Mode
-# =============================
-def calibrate_joint(channel_name, channel_id):
-    print(f"\n--- Calibrating {channel_name} (Channel {channel_id}) ---")
-    print("Use 'a' to decrease, 'd' to increase, 's' to save/exit")
-    
-    angle = current_angles[channel_id]
-    while True:
-        set_servo_angle_instant(channel_id, angle)
-        print(f"Current Angle: {angle}", end="\r")
-        
-        key = input("Step [a/d/s]: ").lower()
-        if key == 'a': angle -= 2
-        elif key == 'd': angle += 2
-        elif key == 's': 
-            print(f"\nSaved {channel_name} at {angle} degrees.")
-            break
-
-# =============================
-# Main Execution
+# MAIN TEST
 # =============================
 if __name__ == "__main__":
     try:
-        # Move to neutral first
-        for i in range(6): set_servo_angle_instant(i, 90)
+        print("Homing all servos to 90 degrees...")
+        for i in range(6):
+            servos[i].angle = 90
+            time.sleep(0.1) # Small stagger to avoid power surge
+            
+        time.sleep(1)
         
-        print("1. Run Slow Test Sequence")
-        print("2. Calibrate a Joint (Find safe limits)")
-        choice = input("Select: ")
-
-        if choice == '1':
-            # Example: Move shoulder slowly
-            move_servo_slow(SHOULDER, 130, speed=0.05)
-            move_servo_slow(SHOULDER, 90, speed=0.05)
-        elif choice == '2':
-            chan = int(input("Which channel to calibrate (0-5)? "))
-            calibrate_joint("TEST_JOINT", chan)
-
+        # Example Test: Move the Base (0) and Shoulder (1)
+        move_slow(0, 130, speed=0.05)
+        move_slow(0, 50, speed=0.05)
+        move_slow(0, 90, speed=0.05)
+        
     except KeyboardInterrupt:
-        print("\nShutting down...")
+        print("\nStopping...")
     finally:
         pca.deinit()
