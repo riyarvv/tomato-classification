@@ -77,6 +77,8 @@ def pick_tomato():
     # We move to 'close' limit. 
     move_slow(GRIPPER_CH, LIMITS[GRIPPER_CH]["close"], speed=0.02)
     time.sleep(1)
+    servos[GRIPPER_CH].angle = None 
+    print("Motor relaxed to prevent overheating.")
 
 def drop_tomato():
     print("Executing Drop Sequence...")
