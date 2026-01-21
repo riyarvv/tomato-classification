@@ -17,7 +17,7 @@ BASE = 0
 SHOULDER = 1
 ELBOW = 2
 PITCH = 3
-GRIPPER = 4
+GRIPPER = 5
 
 # ==============================
 # SERVO LIMITS (SAFE)
