@@ -28,7 +28,7 @@ for ch in channels:
 # CONFIGURATION
 # =============================
 LIMITS = {
-    BASE_CH:     {"neutral": 30,  "min": 20,  "max": 40},
+    BASE_CH:     {"neutral": 20,  "min": 15,  "max": 45},
     PITCH_CH:    {"neutral": 90,  "min": 40,  "max": 120},
     SHOULDER_CH: {"neutral": 130, "pick": 115},
     ELBOW_CH:    {"neutral": 65,  "pick": 100},
