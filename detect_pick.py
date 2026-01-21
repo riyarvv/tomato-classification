@@ -100,9 +100,10 @@ try:
                    cv2.inRange(hsv, np.array([170, 120, 70]), np.array([180, 255, 255]))
         
         contours, _ = cv2.findContours(mask_red, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        print(f"Found {len(contours)} red objects")
 
         for cnt in contours:
-            if cv2.contourArea(cnt) < 2000: continue
+            if cv2.contourArea(cnt) < 1000: continue
             
             x, y, w, h = cv2.boundingRect(cnt)
             tomato_crop = frame[y:y+h, x:x+w]
