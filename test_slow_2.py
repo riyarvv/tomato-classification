@@ -5,66 +5,101 @@ from adafruit_pca9685 import PCA9685
 from adafruit_motor import servo
 
 # =============================
-# INITIALIZATION
+# INITIALIZATION & MAPPING
 # =============================
 i2c = busio.I2C(board.SCL, board.SDA)
 pca = PCA9685(i2c)
 pca.frequency = 50
 
-# Setup 6 servos using the proper library helper
-# This library automatically handles the 16-bit duty cycle math
-servos = []
-for i in range(6):
-    # Adjust min_pulse and max_pulse if your servos don't reach full range
-    s = servo.Servo(pca.channels[i], min_pulse=500, max_pulse=2500)
-    servos.append(s)
+# Mapping Joints to PCA Channels (Adjust indices if your wiring is different)
+BASE_CH     = 0
+SHOULDER_CH = 1
+ELBOW_CH    = 2
+PITCH_CH    = 3
+GRIPPER_CH  = 4
+
+# Initialize Servo Objects
+servos = {}
+channels = [BASE_CH, SHOULDER_CH, ELBOW_CH, PITCH_CH, GRIPPER_CH]
+for ch in channels:
+    servos[ch] = servo.Servo(pca.channels[ch], min_pulse=500, max_pulse=2500)
 
 # =============================
-# SLOW MOVEMENT FUNCTION
+# CONFIGURATION LIMITS
 # =============================
-def move_slow(channel_id, target_angle, speed=0.05):
-    """
-    Moves a servo slowly.
-    speed: delay in seconds between each degree.
-    """
-    # Get the starting angle (default to 90 if unknown)
+# Format: (Neutral, Min_Limit, Max_Limit)
+LIMITS = {
+    BASE_CH:     {"neutral": 30,  "min": 20,  "max": 40},
+    PITCH_CH:    {"neutral": 90,  "min": 40,  "max": 120}, # Updated range
+    SHOULDER_CH: {"neutral": 130, "pick": 115},
+    ELBOW_CH:    {"neutral": 65,  "pick": 100},
+    GRIPPER_CH:  {"open": 180,    "close": 0}
+}
+
+# =============================
+# MOVEMENT LOGIC
+# =============================
+def move_slow(channel_id, target_angle, speed=0.04):
+    """Moves a servo degree-by-degree to prevent jerking."""
     current = servos[channel_id].angle
-    if current is None: 
-        current = 90
-        servos[channel_id].angle = 90
+    
+    # If starting for the first time, assume neutral to avoid sudden snap
+    if current is None:
+        current = LIMITS[channel_id].get("neutral", 90)
     
     start_angle = int(current)
-    target_angle = int(max(0, min(180, target_angle))) # Clamp to safety
+    target_angle = int(target_angle)
     
+    # Safety Clamp
+    if "min" in LIMITS[channel_id] and "max" in LIMITS[channel_id]:
+        target_angle = max(LIMITS[channel_id]["min"], min(LIMITS[channel_id]["max"], target_angle))
+
     if start_angle == target_angle:
         return
 
     step = 1 if target_angle > start_angle else -1
-    
-    print(f"Moving Channel {channel_id} to {target_angle}...")
-    
     for angle in range(start_angle, target_angle + step, step):
         servos[channel_id].angle = angle
         time.sleep(speed)
 
+def go_home():
+    print("Moving to Neutral/Home Position...")
+    # Move in a specific order to avoid hitting the base
+    move_slow(GRIPPER_CH, LIMITS[GRIPPER_CH]["open"])
+    move_slow(ELBOW_CH, LIMITS[ELBOW_CH]["neutral"])
+    move_slow(SHOULDER_CH, LIMITS[SHOULDER_CH]["neutral"])
+    move_slow(PITCH_CH, LIMITS[PITCH_CH]["neutral"])
+    move_slow(BASE_CH, LIMITS[BASE_CH]["neutral"])
+
+def pick_tomato():
+    print("Executing Pick Sequence...")
+    # 1. Position Base and Pitch
+    move_slow(BASE_CH, 40)
+    move_slow(PITCH_CH, 90)
+    
+    # 2. Extend Arm
+    move_slow(SHOULDER_CH, LIMITS[SHOULDER_CH]["pick"])
+    move_slow(ELBOW_CH, LIMITS[ELBOW_CH]["pick"])
+    
+    # 3. Close Gripper (Faster speed for grip)
+    print("Gripping...")
+    move_slow(GRIPPER_CH, LIMITS[GRIPPER_CH]["close"], speed=0.01)
+    time.sleep(1)
+    
+    # 4. Retract
+    move_slow(ELBOW_CH, LIMITS[ELBOW_CH]["neutral"])
+    move_slow(SHOULDER_CH, LIMITS[SHOULDER_CH]["neutral"])
+    go_home()
+
 # =============================
-# MAIN TEST
+# MAIN EXECUTION
 # =============================
 if __name__ == "__main__":
     try:
-        print("Homing all servos to 90 degrees...")
-        for i in range(6):
-            servos[i].angle = 90
-            time.sleep(0.1) # Small stagger to avoid power surge
-            
-        time.sleep(1)
-        
-        # Example Test: Move the Base (0) and Shoulder (1)
-        move_slow(0, 130, speed=0.05)
-        move_slow(0, 50, speed=0.05)
-        move_slow(0, 90, speed=0.05)
-        
+        go_home()
+        time.sleep(2)
+        pick_tomato()
     except KeyboardInterrupt:
-        print("\nStopping...")
+        print("\nEmergency Stop Triggered.")
     finally:
         pca.deinit()
