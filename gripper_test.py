@@ -26,7 +26,7 @@ def test_gripper():
     try:
         while True:
             print("Closing (0 degrees)...")
-            gripper.angle = 0
+            gripper.angle = 30
             time.sleep(2)
             
             print("Middle (90 degrees)...")
@@ -34,7 +34,7 @@ def test_gripper():
             time.sleep(2)
             
             print("Opening (180 degrees)...")
-            gripper.angle = 180
+            gripper.angle = 160
             time.sleep(2)
             
     except KeyboardInterrupt:
