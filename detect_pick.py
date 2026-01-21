@@ -84,7 +84,7 @@ interpreter.allocate_tensors()
 # These must come AFTER allocate_tensors()
 input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
-HEALTHY_CLASS_INDEX = 0
+HEALTHY_CLASS_INDEX = 1
 
 cap = cv2.VideoCapture(0)
 go_home()
