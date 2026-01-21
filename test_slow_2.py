@@ -16,7 +16,7 @@ BASE_CH     = 0
 SHOULDER_CH = 1
 ELBOW_CH    = 2
 PITCH_CH    = 3
-GRIPPER_CH  = 4
+GRIPPER_CH  = 5
 
 # Initialize Servo Objects
 servos = {}
