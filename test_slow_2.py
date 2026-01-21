@@ -32,7 +32,7 @@ LIMITS = {
     PITCH_CH:    {"neutral": 90,  "min": 40,  "max": 120},
     SHOULDER_CH: {"neutral": 130, "pick": 115},
     ELBOW_CH:    {"neutral": 65,  "pick": 100},
-    GRIPPER_CH:  {"open": 180,    "close": 10} # Changed 0 to 10 to prevent stalling
+    GRIPPER_CH:  {"open": 160,    "close": 30} # Changed 0 to 10 to prevent stalling
 }
 
 def move_slow(channel_id, target_angle, speed=0.04):
