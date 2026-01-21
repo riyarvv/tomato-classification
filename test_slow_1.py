@@ -1,169 +1,129 @@
 import time
-import board
-import busio
 from adafruit_pca9685 import PCA9685
-from adafruit_motor import servo
+from board import SCL, SDA
+import busio
 
-# ============================
-# PARAMETERS
-# ============================
-
-SERVO_CHANNELS = 6
-MIN_PULSE = 500
-MAX_PULSE = 2500
-ACTUATION_RANGE = 180
-
-# Global speed control (increase = slower)
-SERVO_SPEED = 0.05   # ✅ SAFE & SLOW (fruit-friendly)
-
-# ============================
-# SAFE ANGLE CONFIGURATION
-# ============================
-
-SERVO_SAFE = {
-    0: {"min": 20, "max": 160, "home": 90},   # Base
-    1: {"min": 30, "max": 140, "home": 90},   # Shoulder
-    2: {"min": 40, "max": 150, "home": 100},  # Elbow
-    3: {"min": 20, "max": 160, "home": 90},   # Wrist
-    4: {"min": 20, "max": 160, "home": 90},   # Extra axis
-    5: {"min": 60, "max": 120, "home": 80},   # Gripper
-}
-
-# ============================
-# INITIALIZATION
-# ============================
-
-i2c = busio.I2C(board.SCL, board.SDA)
+# ==============================
+# PCA9685 SETUP
+# ==============================
+i2c = busio.I2C(SCL, SDA)
 pca = PCA9685(i2c)
 pca.frequency = 50
 
-servos = []
-for i in range(SERVO_CHANNELS):
-    servos.append(
-        servo.Servo(
-            pca.channels[i],
-            actuation_range=ACTUATION_RANGE,
-            min_pulse=MIN_PULSE,
-            max_pulse=MAX_PULSE
-        )
-    )
+# ==============================
+# CHANNEL DEFINITIONS
+# ==============================
+BASE = 0
+SHOULDER = 1
+ELBOW = 2
+PITCH = 3
+GRIPPER = 4
 
-# Track current servo positions
-current_angles = {ch: SERVO_SAFE[ch]["home"] for ch in SERVO_SAFE}
+# ==============================
+# SERVO LIMITS (SAFE)
+# ==============================
+SERVO_MIN = 500
+SERVO_MAX = 2500
 
-# ============================
-# SAFETY FUNCTIONS
-# ============================
+def angle_to_duty(angle):
+    pulse = SERVO_MIN + (angle / 180.0) * (SERVO_MAX - SERVO_MIN)
+    return int((pulse / 20000) * 65535)
 
-def clamp_angle(channel, angle):
-    cfg = SERVO_SAFE[channel]
-    return max(cfg["min"], min(cfg["max"], angle))
+def set_angle(ch, angle):
+    angle = max(0, min(180, angle))
+    pca.channels[ch].duty_cycle = angle_to_duty(angle)
 
+# ==============================
+# SLOW SINGLE-SERVO MOVE
+# ==============================
+def slow_move(ch, start, end, step=1, delay=0.03):
+    if start < end:
+        for a in range(start, end + 1, step):
+            set_angle(ch, a)
+            time.sleep(delay)
+    else:
+        for a in range(start, end - 1, -step):
+            set_angle(ch, a)
+            time.sleep(delay)
 
-def move_servo_safe(channel, target_angle, speed=SERVO_SPEED):
-    target_angle = clamp_angle(channel, target_angle)
-    start_angle = current_angles[channel]
+# ==============================
+# HOME POSITION
+# ==============================
+def home():
+    print("Moving to HOME")
 
-    step = 1 if target_angle > start_angle else -1
+    set_angle(PITCH, 90)
+    time.sleep(0.5)
 
-    print(f"Moving servo {channel} slowly → {target_angle}°")
+    slow_move(GRIPPER, 180, 0)
+    time.sleep(0.5)
 
-    for angle in range(start_angle, target_angle + step, step):
-        servos[channel].angle = angle
-        time.sleep(speed)
+    slow_move(ELBOW, 100, 65)
+    time.sleep(0.5)
 
-    current_angles[channel] = target_angle
+    slow_move(SHOULDER, 115, 130)
+    time.sleep(0.5)
 
+    slow_move(BASE, 90, 0)
+    time.sleep(0.5)
 
-def move_to_home():
-    print("\nMoving all servos slowly to HOME positions...")
-    for ch, cfg in SERVO_SAFE.items():
-        move_servo_safe(ch, cfg["home"])
-    print("All servos at HOME.\n")
+# ==============================
+# PICK SEQUENCE (ONE BY ONE)
+# ==============================
+def pick():
+    print("Picking tomato")
 
-# ============================
-# TEST MODES
-# ============================
+    # 1. Open gripper
+    slow_move(GRIPPER, 0, 180)
+    time.sleep(0.5)
 
-def manual_control(channel):
-    print(f"\n--- MANUAL CONTROL (Servo {channel}) ---")
-    print(f"Safe Range: {SERVO_SAFE[channel]['min']}° – {SERVO_SAFE[channel]['max']}°")
-    print('Enter angle or "x" to return.\n')
+    # 2. Shoulder moves down
+    slow_move(SHOULDER, 130, 115)
+    time.sleep(0.5)
 
-    while True:
-        choice = input("Angle: ")
-        if choice.lower() == 'x':
-            break
-        try:
-            angle = int(choice)
-            move_servo_safe(channel, angle)
-        except ValueError:
-            print("Enter a valid number.")
+    # 3. Elbow moves forward
+    slow_move(ELBOW, 65, 100)
+    time.sleep(0.5)
 
+    # 4. Close gripper
+    slow_move(GRIPPER, 180, 0)
+    time.sleep(0.5)
 
-def automatic_test(channel):
-    print(f"\n--- AUTO TEST (Servo {channel}) ---")
-    cfg = SERVO_SAFE[channel]
+# ==============================
+# DROP SEQUENCE (ONE BY ONE)
+# ==============================
+def drop():
+    print("Dropping tomato")
 
-    test_angles = [
-        cfg["min"],
-        cfg["home"],
-        cfg["max"],
-        cfg["home"],
-        cfg["min"]
-    ]
+    # 1. Lift arm
+    slow_move(ELBOW, 100, 65)
+    time.sleep(0.5)
 
-    for a in test_angles:
-        move_servo_safe(channel, a)
-        time.sleep(0.5)
+    slow_move(SHOULDER, 115, 130)
+    time.sleep(0.5)
 
-    print("Auto test complete.\n")
+    # 2. Rotate to cart
+    slow_move(BASE, 0, 90)
+    time.sleep(0.5)
 
-# ============================
-# MAIN PROGRAM
-# ============================
+    # 3. Release
+    slow_move(GRIPPER, 0, 180)
+    time.sleep(0.5)
 
-if __name__ == "__main__":
-    try:
-        move_to_home()
+# ==============================
+# MAIN
+# ==============================
+try:
+    home()
+    time.sleep(1)
 
-        while True:
-            print("=" * 35)
-            print("  6-AXIS ROBOTIC ARM TEST MENU")
-            print("=" * 35)
+    pick()
+    time.sleep(1)
 
-            chan_input = input(
-                f"Select channel (0–{SERVO_CHANNELS-1}) or 'q' to quit: "
-            )
+    drop()
+    time.sleep(1)
 
-            if chan_input.lower() == 'q':
-                break
+    home()
 
-            try:
-                channel = int(chan_input)
-                if channel not in SERVO_SAFE:
-                    print("Invalid channel.")
-                    continue
-            except ValueError:
-                print("Enter a valid number.")
-                continue
-
-            mode = input(
-                "\n[1] Manual Safe (Slow)\n"
-                "[2] Automatic Safe Sweep (Slow)\n"
-                "Choice: "
-            )
-
-            if mode == '1':
-                manual_control(channel)
-            elif mode == '2':
-                automatic_test(channel)
-            else:
-                print("Invalid selection.")
-
-    except KeyboardInterrupt:
-        print("\nProgram interrupted by user.")
-
-    finally:
-        print("\nShutting down PCA9685 safely.")
-        pca.deinit()
+except KeyboardInterrupt:
+    pca.deinit()
