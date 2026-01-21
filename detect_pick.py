@@ -66,12 +66,25 @@ def pick_and_drop():
 # ==========================================
 # 2. YOUR WORKING TFLITE LOGIC
 # ==========================================
-MODEL_PATH = "tomato_model_pi.tflite"  
-interpreter = Interpreter(model_path=MODEL_PATH)
+# NEW CODE (Paste this)
+MODEL_PATH = "tomato_model_pi.tflite"
+
+try:
+    from tflite_runtime.interpreter import Interpreter
+    # Adding num_threads can sometimes help with initialization stability on Pi 5
+    interpreter = Interpreter(model_path=MODEL_PATH, num_threads=4)
+    print("✅ Interpreter initialized with multi-threading")
+except Exception as e:
+    print(f"❌ Standard load failed: {e}")
+    # Fallback to basic initialization
+    interpreter = Interpreter(model_path=MODEL_PATH)
+
 interpreter.allocate_tensors()
+
+# These must come AFTER allocate_tensors()
 input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
-HEALTHY_CLASS_INDEX = 0 
+HEALTHY_CLASS_INDEX = 0
 
 cap = cv2.VideoCapture(0)
 go_home()
