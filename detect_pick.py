@@ -95,12 +95,10 @@ try:
         if not ret: break
 
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-        # Your ripeness masking logic
         mask_red = cv2.inRange(hsv, np.array([0, 120, 70]), np.array([10, 255, 255])) + \
                    cv2.inRange(hsv, np.array([170, 120, 70]), np.array([180, 255, 255]))
         
         contours, _ = cv2.findContours(mask_red, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        print(f"Found {len(contours)} red objects")
 
         for cnt in contours:
             if cv2.contourArea(cnt) < 1000: continue
@@ -109,7 +107,7 @@ try:
             tomato_crop = frame[y:y+h, x:x+w]
             if tomato_crop.size == 0: continue
 
-            # Preprocessing exactly as per your working script
+            # --- AI INFERENCE ---
             img = cv2.resize(tomato_crop, (224, 224)).astype(np.float32) / 255.0
             img = np.expand_dims(img, axis=0)
             interpreter.set_tensor(input_details[0]['index'], img)
@@ -118,15 +116,28 @@ try:
             class_idx = np.argmax(prediction)
             confidence = prediction[class_idx]
 
-            # ONLY PICK IF RIPE AND HEALTHY
+            # --- VISUAL OUTPUT LOGIC ---
             if class_idx == HEALTHY_CLASS_INDEX and confidence >= 0.60:
-                print("🎯 Ripe & Healthy! Picking now...")
-                cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
-                cv2.imshow("Harvest Vision", frame)
-                cv2.waitKey(1) 
+                # 1. DRAW GREEN BOX FOR HEALTHY
+                color = (0, 255, 0)
+                label_status = "Healthy"
+                cv2.rectangle(frame, (x, y), (x+w, y+h), color, 2)
+                cv2.putText(frame, "Ripe", (x, y - 35), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+                cv2.putText(frame, label_status, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
                 
-                pick_and_drop() # Arm movement triggered here
+                # 2. TRIGGER PICK ONLY HERE
+                cv2.imshow("Harvest Vision", frame)
+                cv2.waitKey(1)
+                print(f"🎯 {label_status} Tomato! Picking...")
+                pick_and_drop()
                 break 
+            else:
+                # 3. DRAW RED BOX FOR UNHEALTHY (No Arm Movement)
+                color = (0, 0, 255)
+                label_status = "Unhealthy"
+                cv2.rectangle(frame, (x, y), (x+w, y+h), color, 2)
+                cv2.putText(frame, "Ripe", (x, y - 35), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                cv2.putText(frame, label_status, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
 
         cv2.imshow("Harvest Vision", frame)
         if cv2.waitKey(1) & 0xFF == ord('q'): break
