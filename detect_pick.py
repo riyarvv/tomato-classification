@@ -1,3 +1,4 @@
+from tflite_runtime.interpreter import Interpreter
 import time
 import board
 import busio
@@ -5,7 +6,6 @@ import cv2
 import numpy as np
 from adafruit_pca9685 import PCA9685
 from adafruit_motor import servo
-from tflite_runtime.interpreter import Interpreter
 
 # =============================
 # INITIALIZATION: ARM & PCA9685
