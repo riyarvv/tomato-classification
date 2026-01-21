@@ -67,7 +67,7 @@ def pick_and_drop():
 # 2. YOUR WORKING TFLITE LOGIC
 # ==========================================
 # NEW CODE (Paste this)
-MODEL_PATH = "tomato_model_pi.tflite"
+MODEL_PATH = "tomato_model_pi_v11.tflite"
 
 try:
     from tflite_runtime.interpreter import Interpreter
