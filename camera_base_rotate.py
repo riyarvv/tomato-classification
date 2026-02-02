@@ -1,40 +1,71 @@
 import time
-from adafruit_servokit import ServoKit
+import board
+import busio
+from adafruit_pca9685 import PCA9685
+from adafruit_motor import servo
 
-# =====================================
-# PCA9685 Initialization
-# =====================================
-# 16-channel PCA9685, default I2C address 0x40
-kit = ServoKit(channels=16)
+# ==========================================
+# PCA9685 SETUP
+# ==========================================
+i2c = busio.I2C(board.SCL, board.SDA)
+pca = PCA9685(i2c)
+pca.frequency = 50
 
-# =====================================
-# Servo Calibration (important for SG90)
-# =====================================
-# Pulse width range in microseconds
-kit.servo[0].set_pulse_width_range(500, 2500)
+# ==========================================
+# CHANNEL MAPPING
+# ==========================================
+BASE_CH   = 0    # Arm base servo
+CAMERA_CH = 4    # Camera SG90 servo
 
-# =====================================
-# Main Program
-# =====================================
+base_servo = servo.Servo(
+    pca.channels[BASE_CH],
+    min_pulse=500,
+    max_pulse=2500
+)
+
+camera_servo = servo.Servo(
+    pca.channels[CAMERA_CH],
+    min_pulse=500,
+    max_pulse=2500
+)
+
+# ==========================================
+# SCAN LIMITS (same as your working test)
+# ==========================================
+SCAN_MIN = 20
+SCAN_MAX = 50
+SCAN_DELAY = 0.03   # matches your ServoKit test speed
+
+# ==========================================
+# MAIN PROGRAM
+# ==========================================
 try:
+    print("🔄 Rotating BASE and CAMERA together")
+
     while True:
-        # Move servo from 20° to 50°
-        for angle in range(20, 51, 1):
-            kit.servo[0].angle = angle
-            time.sleep(0.03)   # controls speed
+        # Move both from 20° → 50°
+        for angle in range(SCAN_MIN, SCAN_MAX + 1):
+            base_servo.angle = angle
+            camera_servo.angle = angle
+            print(f"Base: {angle}°, Camera: {angle}°")
+            time.sleep(SCAN_DELAY)
 
-        time.sleep(1)  # hold at 50°
+        time.sleep(1)
 
-        # Move servo from 50° back to 20°
-        for angle in range(50, 19, -1):
-            kit.servo[0].angle = angle
-            time.sleep(0.03)
+        # Move both from 50° → 20°
+        for angle in range(SCAN_MAX, SCAN_MIN - 1, -1):
+            base_servo.angle = angle
+            camera_servo.angle = angle
+            print(f"Base: {angle}°, Camera: {angle}°")
+            time.sleep(SCAN_DELAY)
 
-        time.sleep(1)  # hold at 20°
+        time.sleep(1)
 
 except KeyboardInterrupt:
-    print("Program stopped by user")
+    print("\n🛑 Program stopped")
 
 finally:
-    # Release the servo (no PWM signal)
-    kit.servo[0].angle = None
+    # Release servos
+    base_servo.angle = None
+    camera_servo.angle = None
+    pca.deinit()
