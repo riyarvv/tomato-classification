@@ -15,7 +15,7 @@ pca.frequency = 50
 # CHANNEL MAPPING
 # ==========================================
 BASE_CH   = 0    # Arm base servo
-CAMERA_CH = 4    # Camera SG90 servo
+CAMERA_CH = 6    # Camera SG90 servo
 
 base_servo = servo.Servo(
     pca.channels[BASE_CH],
@@ -34,7 +34,7 @@ camera_servo = servo.Servo(
 # ==========================================
 SCAN_MIN = 20
 SCAN_MAX = 50
-SCAN_DELAY = 0.03   # matches your ServoKit test speed
+SCAN_DELAY = 0.05   # matches your ServoKit test speed
 
 # ==========================================
 # MAIN PROGRAM
