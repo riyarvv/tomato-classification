@@ -35,6 +35,14 @@ LIMITS = {
 }
 
 # ==========================================
+# AUTO CENTER PARAMETERS
+# ==========================================
+CENTER_TOLERANCE = 25
+CENTER_STEP = 1
+stable_frames = 0
+REQUIRED_STABLE_FRAMES = 5
+
+# ==========================================
 # SMOOTH MOVEMENT
 # ==========================================
 def move_slow(channel, target, delay=0.04):
@@ -60,7 +68,7 @@ def pick_and_drop():
     move_slow(GRIPPER_CH, LIMITS[GRIPPER_CH]["close"], delay=0.01)
     time.sleep(1)
 
-    print("📦 Moving to drop position (10°)")
+    print("📦 Moving to drop position")
     move_slow(BASE_CH, 10, delay=0.04)
     servos[CAMERA_CH].angle = 10
     time.sleep(0.5)
@@ -68,7 +76,7 @@ def pick_and_drop():
     print("🪴 Dropping tomato...")
     move_slow(GRIPPER_CH, LIMITS[GRIPPER_CH]["open"], delay=0.01)
 
-    servos[GRIPPER_CH].angle = None  # stop jitter
+    servos[GRIPPER_CH].angle = None
 
 # ==========================================
 # LOAD MODEL
@@ -81,9 +89,7 @@ input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
 
 HEALTHY_CLASS_INDEX = 1
-MIN_CONFIDENCE = 75        # percent
-LOCK_TIME_REQUIRED = 0.8   # seconds
-lock_start_time = None
+MIN_CONFIDENCE = 75
 
 # ==========================================
 # CAMERA
@@ -91,9 +97,9 @@ lock_start_time = None
 cap = cv2.VideoCapture(0)
 
 # ==========================================
-# SCANNING
+# SCANNING VARIABLES
 # ==========================================
-scan_angle = LIMITS[BASE_CH]["min"]
+scan_angle = LIMITS[BASE_CH]["neutral"]
 scan_direction = 1
 locked = False
 
@@ -102,18 +108,6 @@ locked = False
 # ==========================================
 try:
     while True:
-
-        # -------------------------
-        # SCANNING
-        # -------------------------
-        if not locked and lock_start_time is None:
-            scan_angle += scan_direction
-
-            if scan_angle >= LIMITS[BASE_CH]["max"] or scan_angle <= LIMITS[BASE_CH]["min"]:
-                scan_direction *= -1
-
-            move_slow(BASE_CH, scan_angle, delay=0.03)
-            servos[CAMERA_CH].angle = scan_angle
 
         ret, frame = cap.read()
         if not ret:
@@ -147,6 +141,22 @@ try:
 
         contours,_ = cv2.findContours(mask_red, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
+        # -------------------------
+        # SCANNING ONLY IF NOTHING DETECTED
+        # -------------------------
+        if not locked and len(contours) == 0:
+            scan_angle += scan_direction
+
+            if scan_angle >= LIMITS[BASE_CH]["max"] or scan_angle <= LIMITS[BASE_CH]["min"]:
+                scan_direction *= -1
+
+            servos[BASE_CH].angle = scan_angle
+            servos[CAMERA_CH].angle = scan_angle
+            time.sleep(0.02)
+
+        # -------------------------
+        # PROCESS DETECTIONS
+        # -------------------------
         for cnt in contours:
 
             if cv2.contourArea(cnt) < 1000:
@@ -156,8 +166,22 @@ try:
             tomato_center_x = x + w//2
             tomato_center_y = y + h//2
 
-            is_centered = (zone_left < tomato_center_x < zone_right) and \
-                          (zone_top < tomato_center_y < zone_bottom)
+            offset_x = tomato_center_x - center_x
+            is_centered = abs(offset_x) < CENTER_TOLERANCE
+
+            # AUTO CENTERING
+            if not is_centered and not locked:
+                if offset_x > 0:
+                    scan_angle -= CENTER_STEP
+                else:
+                    scan_angle += CENTER_STEP
+
+                scan_angle = max(LIMITS[BASE_CH]["min"],
+                                 min(LIMITS[BASE_CH]["max"], scan_angle))
+
+                servos[BASE_CH].angle = scan_angle
+                servos[CAMERA_CH].angle = scan_angle
+                time.sleep(0.01)
 
             crop = frame[y:y+h, x:x+w]
             if crop.size == 0:
@@ -173,25 +197,17 @@ try:
             class_idx = np.argmax(prediction)
             confidence = prediction[class_idx] * 100
 
-            # =============================
-            # TIME-BASED LOCK SYSTEM
-            # =============================
-            LOCK_TOLERANCE = 0.3   # seconds allowed to fluctuate
-            last_valid_time = None
-            
+            print("Confidence:", confidence, "Centered:", is_centered)
+
+            # STABLE LOCK
             if (class_idx == HEALTHY_CLASS_INDEX and
                 confidence >= MIN_CONFIDENCE and
                 is_centered):
-            
-                current_time = time.time()
-            
-                if lock_start_time is None:
-                    lock_start_time = current_time
-                    print("⏳ Lock started...")
-            
-                last_valid_time = current_time
-            
-                if current_time - lock_start_time >= LOCK_TIME_REQUIRED:
+
+                stable_frames += 1
+                print("Stable frames:", stable_frames)
+
+                if stable_frames >= REQUIRED_STABLE_FRAMES:
                     print("🎯 FINAL LOCK")
                     locked = True
                     pick_and_drop()
@@ -199,14 +215,8 @@ try:
                     cv2.destroyAllWindows()
                     pca.deinit()
                     exit()
-            
             else:
-                # Only reset if instability lasts longer than tolerance
-                if last_valid_time is not None:
-                    if time.time() - last_valid_time > LOCK_TOLERANCE:
-                        lock_start_time = None
-                        last_valid_time = None
-
+                stable_frames = 0
 
             color = (0,255,0) if class_idx == HEALTHY_CLASS_INDEX else (0,0,255)
             cv2.rectangle(frame,(x,y),(x+w,y+h),color,2)
