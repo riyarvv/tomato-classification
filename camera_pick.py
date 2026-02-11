@@ -37,7 +37,7 @@ LIMITS = {
 # ==========================================
 # SMOOTH MOVEMENT
 # ==========================================
-def move_slow(channel, target, delay=0.03):   # slower base
+def move_slow(channel, target, delay=0.04):   # slower base
     current = servos[channel].angle
     if current is None:
         current = target
@@ -61,7 +61,7 @@ def pick_and_drop():
     time.sleep(1)
 
     print("📦 Moving to drop position (10°)")
-    move_slow(BASE_CH, 10, delay=0.03)
+    move_slow(BASE_CH, 10, delay=0.04)
     servos[CAMERA_CH].angle = 10
     time.sleep(0.5)
 
