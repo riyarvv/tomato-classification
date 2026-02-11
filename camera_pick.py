@@ -18,7 +18,7 @@ pca.frequency = 50
 # CHANNEL MAPPING
 # ==========================================
 BASE_CH, SHOULDER_CH, ELBOW_CH, PITCH_CH, GRIPPER_CH, CAMERA_CH = 0,1,2,3,5,6
-channels = [BASE_CH, SHOULDER_CH, ELBOW_CH, GRIPPER_CH, CAMERA_CH]
+channels = [BASE_CH, SHOULDER_CH, ELBOW_CH, PITCH_CH, GRIPPER_CH, CAMERA_CH]
 
 servos = {}
 for ch in channels:
@@ -45,9 +45,9 @@ servos[CAMERA_CH].angle = LIMITS[BASE_CH]["neutral"]
 time.sleep(2)
 
 # ==========================================
-# SMOOTH MOVEMENT
+# SMOOTH MOVEMENT FUNCTION
 # ==========================================
-def move_slow(channel, target, delay=0.03):
+def move_slow(channel, target, delay=0.04):
     current = servos[channel].angle
     if current is None:
         current = target
@@ -65,7 +65,7 @@ def move_slow(channel, target, delay=0.03):
 def pick_and_drop():
     print("🤖 Picking tomato...")
 
-    # Move to pick position
+    # Move arm to pick position
     move_slow(SHOULDER_CH, LIMITS[SHOULDER_CH]["pick"])
     move_slow(ELBOW_CH, LIMITS[ELBOW_CH]["pick"])
     move_slow(GRIPPER_CH, LIMITS[GRIPPER_CH]["close"], delay=0.01)
@@ -75,19 +75,19 @@ def pick_and_drop():
     print("↩ Returning arm to neutral")
     move_slow(SHOULDER_CH, LIMITS[SHOULDER_CH]["neutral"])
     move_slow(ELBOW_CH, LIMITS[ELBOW_CH]["neutral"])
+    time.sleep(0.5)
 
     # Rotate base to drop position
-    print("📦 Moving base to drop position")
-    move_slow(BASE_CH, 10, delay=0.03)
+    print("📦 Moving to drop position")
+    move_slow(BASE_CH, 10, delay=0.04)
     servos[CAMERA_CH].angle = 10
     time.sleep(0.5)
 
-    # Open gripper to drop
+    # Drop tomato
     print("🪴 Dropping tomato...")
     move_slow(GRIPPER_CH, LIMITS[GRIPPER_CH]["open"], delay=0.01)
 
-    print("✅ Task complete. Stopping.")
-    time.sleep(2)
+    servos[GRIPPER_CH].angle = None
 
 # ==========================================
 # LOAD MODEL
@@ -99,10 +99,8 @@ interpreter.allocate_tensors()
 input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
 
-HEALTHY_CLASS_INDEX = 0   # adjust if needed
+HEALTHY_CLASS_INDEX = 1
 MIN_CONFIDENCE = 75
-REQUIRED_STABLE_FRAMES = 5
-stable_frames = 0
 
 # ==========================================
 # CAMERA
@@ -114,6 +112,7 @@ cap = cv2.VideoCapture(0)
 # ==========================================
 scan_angle = LIMITS[BASE_CH]["neutral"]
 scan_direction = 1
+locked = False
 
 # ==========================================
 # MAIN LOOP
@@ -121,9 +120,31 @@ scan_direction = 1
 try:
     while True:
 
+        # SCANNING
+        if not locked:
+            scan_angle += scan_direction
+
+            if scan_angle >= LIMITS[BASE_CH]["max"] or scan_angle <= LIMITS[BASE_CH]["min"]:
+                scan_direction *= -1
+
+            servos[BASE_CH].angle = scan_angle
+            servos[CAMERA_CH].angle = scan_angle
+            time.sleep(0.03)
+
         ret, frame = cap.read()
         if not ret:
             break
+
+        height, width, _ = frame.shape
+        center_x, center_y = width//2, height//2
+
+        zone_size = 100
+        zone_left = center_x - zone_size//2
+        zone_right = center_x + zone_size//2
+        zone_top = center_y - zone_size//2
+        zone_bottom = center_y + zone_size//2
+
+        cv2.rectangle(frame,(zone_left,zone_top),(zone_right,zone_bottom),(255,255,255),1)
 
         # HSV RED DETECTION
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
@@ -142,22 +163,6 @@ try:
 
         contours,_ = cv2.findContours(mask_red, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        # ======================================
-        # SLOW SCANNING IF NO TOMATO
-        # ======================================
-        if len(contours) == 0:
-            scan_angle += scan_direction
-
-            if scan_angle >= LIMITS[BASE_CH]["max"] or scan_angle <= LIMITS[BASE_CH]["min"]:
-                scan_direction *= -1
-
-            servos[BASE_CH].angle = scan_angle
-            servos[CAMERA_CH].angle = scan_angle
-            time.sleep(0.02)
-
-        # ======================================
-        # PROCESS DETECTIONS
-        # ======================================
         for cnt in contours:
 
             if cv2.contourArea(cnt) < 1000:
@@ -181,21 +186,16 @@ try:
 
             print("Confidence:", confidence)
 
-            if (class_idx == HEALTHY_CLASS_INDEX and
-                confidence >= MIN_CONFIDENCE):
+            if class_idx == HEALTHY_CLASS_INDEX and confidence >= MIN_CONFIDENCE:
+                print("🎯 Tomato confirmed")
+                locked = True
+                pick_and_drop()
 
-                stable_frames += 1
-                print("Stable frames:", stable_frames)
-
-                if stable_frames >= REQUIRED_STABLE_FRAMES:
-                    print("🎯 FINAL LOCK")
-                    pick_and_drop()
-                    cap.release()
-                    cv2.destroyAllWindows()
-                    pca.deinit()
-                    exit()
-            else:
-                stable_frames = 0
+                print("🛑 Completed")
+                cap.release()
+                cv2.destroyAllWindows()
+                pca.deinit()
+                exit()
 
             color = (0,255,0) if class_idx == HEALTHY_CLASS_INDEX else (0,0,255)
             cv2.rectangle(frame,(x,y),(x+w,y+h),color,2)
