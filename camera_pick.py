@@ -106,7 +106,7 @@ try:
         # -------------------------
         # SCANNING
         # -------------------------
-        if not locked:
+        if not locked and lock_start_time is None:
             scan_angle += scan_direction
 
             if scan_angle >= LIMITS[BASE_CH]["max"] or scan_angle <= LIMITS[BASE_CH]["min"]:
