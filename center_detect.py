@@ -26,7 +26,7 @@ LIMITS = {
     BASE_CH:     {"neutral": 20,  "min": 10,  "max": 50},
     PITCH_CH:    {"neutral": 90,  "min": 40,  "max": 120},
     SHOULDER_CH: {"neutral": 130, "pick": 115},
-    ELBOW_CH:    {"neutral": 65,  "pick": 100},
+    ELBOW_CH:    {"neutral": 30,  "pick": 50},
     GRIPPER_CH:  {"open": 170,    "close": 20}
 }
 
