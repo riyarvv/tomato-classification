@@ -74,7 +74,7 @@ def pick_and_drop():
 # ==========================================
 # 6️⃣ LOAD TFLITE MODEL
 # ==========================================
-MODEL_PATH = "tomato_model_pi.tflite"
+MODEL_PATH = "tomato_model_pi_v11.tflite"
 interpreter = Interpreter(model_path=MODEL_PATH)
 interpreter.allocate_tensors()
 
