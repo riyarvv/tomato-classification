@@ -82,8 +82,8 @@ input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
 
 HEALTHY_CLASS_INDEX = 1
-MIN_CONFIDENCE = 85
-REQUIRED_STABLE = 5
+MIN_CONFIDENCE = 75
+REQUIRED_STABLE = 3
 stable_count = 0
 
 # ==========================================
