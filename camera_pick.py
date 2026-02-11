@@ -176,27 +176,37 @@ try:
             # =============================
             # TIME-BASED LOCK SYSTEM
             # =============================
+            LOCK_TOLERANCE = 0.3   # seconds allowed to fluctuate
+            last_valid_time = None
+            
             if (class_idx == HEALTHY_CLASS_INDEX and
                 confidence >= MIN_CONFIDENCE and
                 is_centered):
-
+            
+                current_time = time.time()
+            
                 if lock_start_time is None:
-                    lock_start_time = time.time()
+                    lock_start_time = current_time
                     print("⏳ Lock started...")
-
-                elif time.time() - lock_start_time >= LOCK_TIME_REQUIRED:
+            
+                last_valid_time = current_time
+            
+                if current_time - lock_start_time >= LOCK_TIME_REQUIRED:
                     print("🎯 FINAL LOCK")
                     locked = True
                     pick_and_drop()
-
-                    print("🛑 Completed")
                     cap.release()
                     cv2.destroyAllWindows()
                     pca.deinit()
                     exit()
-
+            
             else:
-                lock_start_time = None
+                # Only reset if instability lasts longer than tolerance
+                if last_valid_time is not None:
+                    if time.time() - last_valid_time > LOCK_TOLERANCE:
+                        lock_start_time = None
+                        last_valid_time = None
+
 
             color = (0,255,0) if class_idx == HEALTHY_CLASS_INDEX else (0,0,255)
             cv2.rectangle(frame,(x,y),(x+w,y+h),color,2)
