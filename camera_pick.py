@@ -37,7 +37,7 @@ LIMITS = {
 # ==========================================
 # SMOOTH MOVEMENT
 # ==========================================
-def move_slow(channel, target, delay=0.04):   # slower base
+def move_slow(channel, target, delay=0.04):
     current = servos[channel].angle
     if current is None:
         current = target
@@ -68,8 +68,7 @@ def pick_and_drop():
     print("🪴 Dropping tomato...")
     move_slow(GRIPPER_CH, LIMITS[GRIPPER_CH]["open"], delay=0.01)
 
-    # Stop gripper PWM to prevent jitter
-    servos[GRIPPER_CH].angle = None
+    servos[GRIPPER_CH].angle = None  # stop jitter
 
 # ==========================================
 # LOAD MODEL
@@ -82,9 +81,9 @@ input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
 
 HEALTHY_CLASS_INDEX = 1
-MIN_CONFIDENCE = 75
-REQUIRED_STABLE = 3
-stable_count = 0
+MIN_CONFIDENCE = 75        # percent
+LOCK_TIME_REQUIRED = 0.8   # seconds
+lock_start_time = None
 
 # ==========================================
 # CAMERA
@@ -105,7 +104,7 @@ try:
     while True:
 
         # -------------------------
-        # SCANNING (SLOW & STABLE)
+        # SCANNING
         # -------------------------
         if not locked:
             scan_angle += scan_direction
@@ -123,18 +122,15 @@ try:
         height, width, _ = frame.shape
         center_x, center_y = width//2, height//2
 
-        # Draw "+"
-        cv2.line(frame,(center_x-20,center_y),(center_x+20,center_y),(255,255,255),2)
-        cv2.line(frame,(center_x,center_y-20),(center_x,center_y+20),(255,255,255),2)
-
         zone_size = 100
         zone_left = center_x - zone_size//2
         zone_right = center_x + zone_size//2
         zone_top = center_y - zone_size//2
         zone_bottom = center_y + zone_size//2
+
         cv2.rectangle(frame,(zone_left,zone_top),(zone_right,zone_bottom),(255,255,255),1)
 
-        # HSV Red Detection
+        # HSV RED DETECTION
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
         lower_red1 = np.array([0,120,70])
@@ -152,6 +148,7 @@ try:
         contours,_ = cv2.findContours(mask_red, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
         for cnt in contours:
+
             if cv2.contourArea(cnt) < 1000:
                 continue
 
@@ -177,33 +174,32 @@ try:
             confidence = prediction[class_idx] * 100
 
             # =============================
-            # STABLE DETECTION (WITH DECAY)
+            # TIME-BASED LOCK SYSTEM
             # =============================
             if (class_idx == HEALTHY_CLASS_INDEX and
                 confidence >= MIN_CONFIDENCE and
                 is_centered):
 
-                stable_count += 1
-                print(f"Stable {stable_count}/{REQUIRED_STABLE} | {confidence:.1f}%")
+                if lock_start_time is None:
+                    lock_start_time = time.time()
+                    print("⏳ Lock started...")
+
+                elif time.time() - lock_start_time >= LOCK_TIME_REQUIRED:
+                    print("🎯 FINAL LOCK")
+                    locked = True
+                    pick_and_drop()
+
+                    print("🛑 Completed")
+                    cap.release()
+                    cv2.destroyAllWindows()
+                    pca.deinit()
+                    exit()
 
             else:
-                stable_count = max(0, stable_count - 1)
+                lock_start_time = None
 
-            # Draw box
             color = (0,255,0) if class_idx == HEALTHY_CLASS_INDEX else (0,0,255)
             cv2.rectangle(frame,(x,y),(x+w,y+h),color,2)
-
-            # FINAL LOCK
-            if stable_count >= REQUIRED_STABLE and not locked:
-                print("🎯 FINAL LOCK")
-                locked = True
-                pick_and_drop()
-
-                print("🛑 Completed")
-                cap.release()
-                cv2.destroyAllWindows()
-                pca.deinit()
-                exit()
 
         cv2.imshow("AI Harvest System", frame)
 
