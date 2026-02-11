@@ -30,19 +30,19 @@ for ch in channels:
     )
 
 # ==========================================
-# 3️⃣ SERVO LIMITS
+# 3️⃣ LIMITS
 # ==========================================
 LIMITS = {
     BASE_CH:     {"neutral":20, "min":10, "max":100},
     SHOULDER_CH: {"neutral":130, "pick":115},
-    ELBOW_CH:    {"neutral":30,  "pick":50},
+    ELBOW_CH:    {"neutral":65,  "pick":100},
     PITCH_CH:    {"neutral":90},
     GRIPPER_CH:  {"open":170, "close":20},
     CAMERA_CH:   {"min":10, "max":100}
 }
 
 # ==========================================
-# 4️⃣ SMOOTH MOVEMENT FUNCTION (ANTI-JERK)
+# 4️⃣ SMOOTH MOVEMENT
 # ==========================================
 def move_slow(channel, target, delay=0.02):
     current = servos[channel].angle
@@ -57,35 +57,26 @@ def move_slow(channel, target, delay=0.02):
         time.sleep(delay)
 
 # ==========================================
-# 5️⃣ HOME POSITION
+# 5️⃣ PICK FUNCTION
 # ==========================================
-def go_home():
-    move_slow(GRIPPER_CH, LIMITS[GRIPPER_CH]["open"])
-    move_slow(ELBOW_CH, LIMITS[ELBOW_CH]["neutral"])
-    move_slow(SHOULDER_CH, LIMITS[SHOULDER_CH]["neutral"])
-    move_slow(PITCH_CH, LIMITS[PITCH_CH]["neutral"])
-    move_slow(BASE_CH, LIMITS[BASE_CH]["neutral"])
-    servos[CAMERA_CH].angle = servos[BASE_CH].angle
-
-# ==========================================
-# 6️⃣ PICK SEQUENCE (NO BASE MOVEMENT HERE)
-# ==========================================
-def pick_and_drop():
+def pick_tomato():
     print("🤖 Picking tomato...")
-
     move_slow(SHOULDER_CH, LIMITS[SHOULDER_CH]["pick"])
     move_slow(ELBOW_CH, LIMITS[ELBOW_CH]["pick"])
     move_slow(GRIPPER_CH, LIMITS[GRIPPER_CH]["close"], delay=0.01)
     time.sleep(1)
 
-    move_slow(ELBOW_CH, LIMITS[ELBOW_CH]["neutral"])
-    move_slow(SHOULDER_CH, LIMITS[SHOULDER_CH]["neutral"])
+def drop_tomato():
+    print("📦 Moving to drop position...")
+    move_slow(BASE_CH, 10, delay=0.02)   # Move base to 10°
+    servos[CAMERA_CH].angle = servos[BASE_CH].angle
+    time.sleep(0.5)
+
+    print("🪴 Dropping tomato...")
     move_slow(GRIPPER_CH, LIMITS[GRIPPER_CH]["open"], delay=0.01)
 
-    print("✅ Pick complete")
-
 # ==========================================
-# 7️⃣ LOAD TFLITE MODEL
+# 6️⃣ LOAD MODEL
 # ==========================================
 MODEL_PATH = "tomato_model_pi_v11.tflite"
 interpreter = Interpreter(model_path=MODEL_PATH, num_threads=4)
@@ -96,27 +87,21 @@ output_details = interpreter.get_output_details()
 HEALTHY_CLASS_INDEX = 1
 
 # ==========================================
-# 8️⃣ CAMERA INITIALIZATION
+# 7️⃣ CAMERA
 # ==========================================
 cap = cv2.VideoCapture(0)
-go_home()
 
 # ==========================================
-# 9️⃣ SCANNING VARIABLES
+# 8️⃣ SCANNING VARIABLES
 # ==========================================
 scan_angle = LIMITS[BASE_CH]["min"]
 scan_direction = 1
 locked = False
 
-# ==========================================
-# 🔄 MAIN LOOP
-# ==========================================
 try:
     while True:
 
-        # ==========================
-        # 🔄 SMOOTH SCANNING
-        # ==========================
+        # 🔄 SCANNING
         if not locked:
             scan_angle += scan_direction
 
@@ -126,15 +111,17 @@ try:
             move_slow(BASE_CH, scan_angle, delay=0.01)
             servos[CAMERA_CH].angle = servos[BASE_CH].angle
 
-        # ==========================
-        # 📷 FRAME CAPTURE
-        # ==========================
+        # 📷 FRAME
         ret, frame = cap.read()
         if not ret:
             break
 
         height, width, _ = frame.shape
         center_x, center_y = width//2, height//2
+
+        # 🎯 Draw CROSSHAIR "+"
+        cv2.line(frame, (center_x-20, center_y), (center_x+20, center_y), (255,255,255), 2)
+        cv2.line(frame, (center_x, center_y-20), (center_x, center_y+20), (255,255,255), 2)
 
         zone_size = 100
         zone_left = center_x - zone_size//2
@@ -183,22 +170,20 @@ try:
                     print(f"🎯 Target locked at angle {scan_angle}")
                     locked = True
 
-                    pick_and_drop()
+                    pick_tomato()
+                    drop_tomato()
 
-                    time.sleep(2)
-                    locked = False
-
-            else:
-                cv2.rectangle(frame,(x,y),(x+w,y+h),(0,0,255),2)
+                    print("🛑 Task Complete. Stopping system.")
+                    cap.release()
+                    cv2.destroyAllWindows()
+                    pca.deinit()
+                    exit()
 
         cv2.imshow("Harvest Vision", frame)
 
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
 
-# ==========================================
-# 🛑 CLEAN EXIT
-# ==========================================
 finally:
     cap.release()
     cv2.destroyAllWindows()
