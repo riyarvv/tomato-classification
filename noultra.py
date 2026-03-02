@@ -3,16 +3,12 @@ import numpy as np
 import time
 from tflite_runtime.interpreter import Interpreter
 
-# ==========================
-# CONFIG
-# ==========================
 MODEL_PATH = "best_float16.tflite"
 CONF_THRESHOLD = 0.25
 IOU_THRESHOLD = 0.45
+RIPE_CLASS_ID = 2  # confirmed ripe class
 
-# ==========================
-# LOAD MODEL
-# ==========================
+# Load model
 interpreter = Interpreter(model_path=MODEL_PATH)
 interpreter.allocate_tensors()
 
@@ -22,16 +18,14 @@ output_details = interpreter.get_output_details()
 input_h = input_details[0]['shape'][1]
 input_w = input_details[0]['shape'][2]
 
-# ==========================
-# CAMERA
-# ==========================
 cap = cv2.VideoCapture(0)
+cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+cv2.namedWindow("Tomato Detection", cv2.WINDOW_NORMAL)
+cv2.resizeWindow("Tomato Detection", 960, 720)
 
 prev_time = 0
 
-# ==========================
-# MAIN LOOP
-# ==========================
 while True:
     ret, frame = cap.read()
     if not ret:
@@ -39,8 +33,9 @@ while True:
 
     orig_h, orig_w = frame.shape[:2]
 
-    # -------- PREPROCESS --------
+    # Preprocess
     img = cv2.resize(frame, (input_w, input_h))
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     img = img.astype(np.float32) / 255.0
     img = np.expand_dims(img, axis=0)
 
@@ -52,17 +47,17 @@ while True:
 
     boxes = []
     scores = []
-    class_ids = []
 
-    # -------- DECODE (3 CLASS MODEL) --------
     for pred in output:
         x, y, w, h = pred[:4]
-        class_scores = pred[4:]  # 3 class probabilities
+        class_scores = pred[4:]
 
         class_id = int(np.argmax(class_scores))
         confidence = class_scores[class_id]
 
-        if confidence > CONF_THRESHOLD and class_id == 2:
+        # ✅ ONLY allow ripe
+        if confidence > CONF_THRESHOLD and class_id == RIPE_CLASS_ID:
+
             xmin = int((x - w/2) * orig_w)
             ymin = int((y - h/2) * orig_h)
             xmax = int((x + w/2) * orig_w)
@@ -70,24 +65,16 @@ while True:
 
             boxes.append([xmin, ymin, xmax - xmin, ymax - ymin])
             scores.append(float(confidence))
-            class_ids.append(class_id)
 
-    # -------- NMS --------
     indices = cv2.dnn.NMSBoxes(boxes, scores, CONF_THRESHOLD, IOU_THRESHOLD)
 
     if len(indices) > 0:
         for i in indices.flatten():
             x, y, bw, bh = boxes[i]
             score = scores[i]
-            cid = class_ids[i]
 
-            # Class 2 = Ripe (as you confirmed)
-            if cid == 2:
-                label = f"Ripe {score:.2f}"
-                color = (0, 255, 0)
-            else:
-                label = f"Class {cid} {score:.2f}"
-                color = (0, 0, 255)
+            label = f"Ripe {score:.2f}"
+            color = (0, 255, 0)
 
             cv2.rectangle(frame, (x, y), (x + bw, y + bh), color, 2)
             cv2.putText(frame,
@@ -98,20 +85,18 @@ while True:
                         color,
                         2)
 
-    # -------- FPS --------
+    # FPS
     curr_time = time.time()
     fps = 1 / (curr_time - prev_time)
     prev_time = curr_time
 
-    cv2.putText(frame,
-                f"FPS: {int(fps)}",
+    cv2.putText(frame, f"FPS: {int(fps)}",
                 (20, 40),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 1,
                 (255, 0, 0),
                 2)
 
-    # -------- SHOW WINDOW (NATURAL SIZE) --------
     cv2.imshow("Tomato Detection", frame)
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
