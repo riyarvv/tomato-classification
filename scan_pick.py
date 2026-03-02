@@ -131,7 +131,7 @@ try:
             if scan_angle >= LIMITS[BASE_CH]["max"] or scan_angle <= LIMITS[BASE_CH]["min"]:
                 scan_direction *= -1
 
-            move_slow(BASE_CH, scan_angle, delay=0.005)
+            move_slow(BASE_CH, scan_angle, delay=0.003)
             servos[CAMERA_CH].angle = servos[BASE_CH].angle
 
         # 📷 FRAME
