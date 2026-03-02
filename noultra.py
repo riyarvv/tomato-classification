@@ -62,7 +62,7 @@ while True:
         class_id = int(np.argmax(class_scores))
         confidence = class_scores[class_id]
 
-        if confidence > CONF_THRESHOLD:
+        if confidence > CONF_THRESHOLD and class_id == 2:
             xmin = int((x - w/2) * orig_w)
             ymin = int((y - h/2) * orig_h)
             xmax = int((x + w/2) * orig_w)
