@@ -17,47 +17,59 @@ print("Model Loaded ✅")
 # Settings
 # ==============================
 IMG_SIZE = 640
-CONF_THRESHOLD = 0.4
-RIPE_CLASS_ID = 2   # change if needed
+CONF_THRESHOLD = 0.25
+NMS_THRESHOLD = 0.45
+RIPE_CLASS_ID = 1   # CHANGE if needed (usually 1 if 2 classes)
 
 # ==============================
 # Start Camera
 # ==============================
 cap = cv2.VideoCapture(0)
 
-print("Camera Started")
+if not cap.isOpened():
+    print("❌ Camera failed to open")
+    exit()
+
+print("Camera Started ✅")
 print("Detecting ONLY RIPE 🍅")
 print("Press Q to Quit")
 
 while True:
     ret, frame = cap.read()
     if not ret:
+        print("❌ Failed to grab frame")
         break
 
     original = frame.copy()
     h, w, _ = frame.shape
 
-    # Resize
+    # ==============================
+    # Preprocess
+    # ==============================
     img = cv2.resize(frame, (IMG_SIZE, IMG_SIZE))
     img = img.astype(np.float32) / 255.0
     img = np.expand_dims(img, axis=0)
 
+    # ==============================
     # Inference
+    # ==============================
     interpreter.set_tensor(input_details[0]['index'], img)
     interpreter.invoke()
     output = interpreter.get_tensor(output_details[0]['index'])
 
-    predictions = output[0]   # shape (7, 8400)
+    # Output shape: (1, 7, 8400)
+    predictions = output[0].T  # (8400, 7)
 
-    for i in range(predictions.shape[1]):
+    boxes = []
+    scores = []
 
-        x = predictions[0][i]
-        y = predictions[1][i]
-        w_box = predictions[2][i]
-        h_box = predictions[3][i]
-        obj_conf = predictions[4][i]
+    # ==============================
+    # Decode Predictions
+    # ==============================
+    for pred in predictions:
+        x, y, bw, bh, obj_conf, c0, c1 = pred
 
-        class_scores = predictions[5:, i]
+        class_scores = np.array([c0, c1])
         class_id = np.argmax(class_scores)
         class_conf = class_scores[class_id]
 
@@ -65,18 +77,39 @@ while True:
 
         if confidence > CONF_THRESHOLD and class_id == RIPE_CLASS_ID:
 
-            # Convert from center format to box format
-            xmin = int((x - w_box / 2) * w / IMG_SIZE)
-            ymin = int((y - h_box / 2) * h / IMG_SIZE)
-            xmax = int((x + w_box / 2) * w / IMG_SIZE)
-            ymax = int((y + h_box / 2) * h / IMG_SIZE)
+            # Convert center format to corner format
+            xmin = (x - bw / 2) * w / IMG_SIZE
+            ymin = (y - bh / 2) * h / IMG_SIZE
+            xmax = (x + bw / 2) * w / IMG_SIZE
+            ymax = (y + bh / 2) * h / IMG_SIZE
 
-            # Draw box
-            cv2.rectangle(original, (xmin, ymin), (xmax, ymax), (0,255,0), 2)
-            cv2.putText(original, f"RIPE {confidence:.2f}",
-                        (xmin, ymin - 10),
+            boxes.append([int(xmin), int(ymin),
+                          int(xmax - xmin), int(ymax - ymin)])
+            scores.append(float(confidence))
+
+    # ==============================
+    # Apply NMS
+    # ==============================
+    indices = cv2.dnn.NMSBoxes(boxes, scores,
+                               CONF_THRESHOLD,
+                               NMS_THRESHOLD)
+
+    if len(indices) > 0:
+        for i in indices.flatten():
+            x, y, bw, bh = boxes[i]
+            conf = scores[i]
+
+            cv2.rectangle(original,
+                          (x, y),
+                          (x + bw, y + bh),
+                          (0, 255, 0), 2)
+
+            cv2.putText(original,
+                        f"RIPE {conf:.2f}",
+                        (x, y - 10),
                         cv2.FONT_HERSHEY_SIMPLEX,
-                        0.6, (0,255,0), 2)
+                        0.6,
+                        (0, 255, 0), 2)
 
     cv2.imshow("Ripe Detection", original)
 
@@ -85,3 +118,4 @@ while True:
 
 cap.release()
 cv2.destroyAllWindows()
+print("Camera Closed ✅")
