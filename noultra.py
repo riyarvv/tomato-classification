@@ -1,158 +1,128 @@
 import cv2
 import numpy as np
-import tflite_runtime.interpreter as tflite
+import time
+from tflite_runtime.interpreter import Interpreter
 
 # ==============================
-# SETTINGS
+# CONFIG
 # ==============================
-MODEL_PATH = "best_float16.tflite"
-IMG_SIZE = 640
-CONF_THRESHOLD = 0.20
-NMS_THRESHOLD = 0.45
-RIPE_CLASS_ID = 1   # Change if needed (0 or 1 depending on dataset)
-
-# ==============================
-# SIGMOID FUNCTION
-# ==============================
-def sigmoid(x):
-    return 1 / (1 + np.exp(-x))
+MODEL_PATH = "best.tflite"   # change to your model
+CONF_THRESHOLD = 0.4
+IOU_THRESHOLD = 0.45
+INPUT_SIZE = 640
 
 # ==============================
 # LOAD MODEL
 # ==============================
-print("Loading model...")
-interpreter = tflite.Interpreter(model_path=MODEL_PATH)
+interpreter = Interpreter(model_path=MODEL_PATH)
 interpreter.allocate_tensors()
 
 input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
 
-print("Model Loaded ✅")
+# ==============================
+# CAMERA SETUP
+# ==============================
+cap = cv2.VideoCapture(0)
+cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+cv2.namedWindow("YOLO Detection", cv2.WINDOW_NORMAL)
+cv2.resizeWindow("YOLO Detection", 960, 720)
 
 # ==============================
-# OPEN CAMERA SAFELY
+# PREPROCESS FUNCTION
 # ==============================
-cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
+def preprocess(frame):
+    img = cv2.resize(frame, (INPUT_SIZE, INPUT_SIZE))
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    img = img.astype(np.float32) / 255.0
+    img = np.expand_dims(img, axis=0)
+    return img
 
-if not cap.isOpened():
-    print("❌ Camera failed to open")
-    exit()
-
-print("Camera Started ✅")
-print("Press Q to Quit")
+# ==============================
+# NMS FUNCTION
+# ==============================
+def non_max_suppression(boxes, scores):
+    indices = cv2.dnn.NMSBoxes(
+        boxes,
+        scores,
+        CONF_THRESHOLD,
+        IOU_THRESHOLD
+    )
+    return indices
 
 # ==============================
 # MAIN LOOP
 # ==============================
+prev_time = 0
+
 while True:
     ret, frame = cap.read()
     if not ret:
-        print("❌ Frame capture failed")
         break
 
-    original = frame.copy()
-    h, w, _ = frame.shape
+    original_h, original_w = frame.shape[:2]
 
-    # --------------------------
-    # PREPROCESS
-    # --------------------------
-    img = cv2.resize(frame, (IMG_SIZE, IMG_SIZE))
-    img = img.astype(np.float32) / 255.0
-    img = np.expand_dims(img, axis=0)
-
-    # --------------------------
-    # INFERENCE
-    # --------------------------
-    interpreter.set_tensor(input_details[0]['index'], img)
+    # Preprocess
+    input_data = preprocess(frame)
+    interpreter.set_tensor(input_details[0]['index'], input_data)
     interpreter.invoke()
-    output = interpreter.get_tensor(output_details[0]['index'])
 
-    # --------------------------
-    # HANDLE OUTPUT SHAPE
-    # --------------------------
-    if output.shape[1] == 7:
-        predictions = output[0].T      # (8400,7)
-    else:
-        predictions = output[0]        # already (8400,7)
+    output = interpreter.get_tensor(output_details[0]['index'])[0]
 
     boxes = []
     scores = []
+    class_ids = []
 
-    # --------------------------
-    # DECODE PREDICTIONS
-    # --------------------------
-    for pred in predictions:
+    for det in output:
+        confidence = det[4]
+        if confidence < CONF_THRESHOLD:
+            continue
 
-        x, y, bw, bh, obj_conf, class0, class1 = pred
-
-        # Apply sigmoid (IMPORTANT for TFLite)
-        obj_conf = sigmoid(obj_conf)
-        class0 = sigmoid(class0)
-        class1 = sigmoid(class1)
-
-        class_scores = np.array([class0, class1])
+        class_scores = det[5:]
         class_id = np.argmax(class_scores)
-        class_conf = class_scores[class_id]
+        score = class_scores[class_id]
 
-        confidence = obj_conf * class_conf
+        if score < CONF_THRESHOLD:
+            continue
 
-        if confidence > CONF_THRESHOLD and class_id == RIPE_CLASS_ID:
+        # YOLO format: x_center, y_center, w, h
+        x_center, y_center, w, h = det[0:4]
 
-            xmin = (x - bw / 2) * w / IMG_SIZE
-            ymin = (y - bh / 2) * h / IMG_SIZE
-            xmax = (x + bw / 2) * w / IMG_SIZE
-            ymax = (y + bh / 2) * h / IMG_SIZE
+        x = int((x_center - w / 2) * original_w)
+        y = int((y_center - h / 2) * original_h)
+        width = int(w * original_w)
+        height = int(h * original_h)
 
-            boxes.append([
-                int(xmin),
-                int(ymin),
-                int(xmax - xmin),
-                int(ymax - ymin)
-            ])
-            scores.append(float(confidence))
+        boxes.append([x, y, width, height])
+        scores.append(float(score))
+        class_ids.append(class_id)
 
-    # --------------------------
-    # APPLY NMS
-    # --------------------------
-    if len(boxes) > 0:
-        indices = cv2.dnn.NMSBoxes(
-            boxes,
-            scores,
-            CONF_THRESHOLD,
-            NMS_THRESHOLD
-        )
+    indices = non_max_suppression(boxes, scores)
 
-        if len(indices) > 0:
-            for i in indices.flatten():
-                x, y, bw, bh = boxes[i]
-                conf = scores[i]
+    if len(indices) > 0:
+        for i in indices.flatten():
+            x, y, w, h = boxes[i]
 
-                cv2.rectangle(
-                    original,
-                    (x, y),
-                    (x + bw, y + bh),
-                    (0, 255, 0),
-                    2
-                )
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            label = f"Class {class_ids[i]}: {scores[i]:.2f}"
+            cv2.putText(frame, label, (x, y - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6, (0, 255, 0), 2)
 
-                cv2.putText(
-                    original,
-                    f"RIPE {conf:.2f}",
-                    (x, y - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    (0, 255, 0),
-                    2
-                )
+    # FPS Counter
+    curr_time = time.time()
+    fps = 1 / (curr_time - prev_time)
+    prev_time = curr_time
 
-    cv2.imshow("Ripe Detection", original)
+    cv2.putText(frame, f"FPS: {int(fps)}", (20, 40),
+                cv2.FONT_HERSHEY_SIMPLEX, 1,
+                (0, 0, 255), 2)
+
+    cv2.imshow("YOLO Detection", frame)
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
-# ==============================
-# CLEAN EXIT
-# ==============================
 cap.release()
 cv2.destroyAllWindows()
-print("Camera Closed ✅")
