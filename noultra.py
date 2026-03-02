@@ -6,7 +6,7 @@ from tflite_runtime.interpreter import Interpreter
 # ==============================
 # CONFIG
 # ==============================
-MODEL_PATH = "best.tflite"   # change to your model
+MODEL_PATH = "best_float16.tflite"   # change to your model
 CONF_THRESHOLD = 0.4
 IOU_THRESHOLD = 0.45
 INPUT_SIZE = 640
