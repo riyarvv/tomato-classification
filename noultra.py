@@ -21,7 +21,11 @@ cap = cv2.VideoCapture(0)
 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
 cv2.namedWindow("Tomato Detection", cv2.WINDOW_NORMAL)
-cv2.resizeWindow("Tomato Detection", 1920, 1080)
+cv2.setWindowProperty(
+    "Tomato Detection",
+    cv2.WND_PROP_FULLSCREEN,
+    cv2.WINDOW_FULLSCREEN
+)
 
 prev_time = 0
 
