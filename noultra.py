@@ -67,6 +67,7 @@ while True:
     input_data = preprocess(frame)
     interpreter.set_tensor(input_details[0]['index'], input_data)
     interpreter.invoke()
+    print(output.shape)
 
     output = interpreter.get_tensor(output_details[0]['index'])[0]
 
