@@ -1,103 +1,98 @@
 import cv2
 import numpy as np
-import tflite_runtime.interpreter as tflite
+import time
+from tflite_runtime.interpreter import Interpreter
 
-# =============================
-# Load Model
-# =============================
-interpreter = tflite.Interpreter(model_path="best_float16.tflite")
+MODEL_PATH = "best_float16.tflite"
+CONF_THRESHOLD = 0.30
+IOU_THRESHOLD = 0.45
+RIPE_CLASS_ID = 2  # confirmed from ultralytics test
+
+# Load model
+interpreter = Interpreter(model_path=MODEL_PATH)
 interpreter.allocate_tensors()
 
 input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
 
-print("Model Loaded ✅")
+input_h = input_details[0]['shape'][1]
+input_w = input_details[0]['shape'][2]
 
-IMG_SIZE = 640
-CONF_THRESHOLD = 0.20
-NMS_THRESHOLD = 0.45
-
-# Change this after checking which class is ripe
-RIPE_CLASS_ID = 1   # try 0 if needed
-
-# =============================
-# Camera
-# =============================
 cap = cv2.VideoCapture(0)
+cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
-if not cap.isOpened():
-    print("Camera not opened ❌")
-    exit()
+cv2.namedWindow("YOLO Ripeness Detection", cv2.WINDOW_NORMAL)
+cv2.resizeWindow("YOLO Ripeness Detection", 960, 720)
 
-print("Camera Started ✅")
+prev_time = 0
 
 while True:
     ret, frame = cap.read()
     if not ret:
         break
 
-    original = frame.copy()
-    h, w, _ = frame.shape
+    orig_h, orig_w = frame.shape[:2]
 
     # Preprocess
-    img = cv2.resize(frame, (IMG_SIZE, IMG_SIZE))
+    img = cv2.resize(frame, (input_w, input_h))
     img = img.astype(np.float32) / 255.0
     img = np.expand_dims(img, axis=0)
 
-    # Inference
     interpreter.set_tensor(input_details[0]['index'], img)
     interpreter.invoke()
-    output = interpreter.get_tensor(output_details[0]['index'])
 
-    # Output shape (1,7,8400)
-    predictions = output[0].T   # (8400,7)
+    output = interpreter.get_tensor(output_details[0]['index'])[0]  # (7,8400)
+    output = output.T  # -> (8400,7)
+
+    print("Max confidence:", np.max(output[:,4]))
+    print("Unique class IDs:", np.unique(output[:,5]))
 
     boxes = []
     scores = []
 
-    for pred in predictions:
-        x, y, bw, bh = pred[0:4]
-        obj_conf = pred[4]
-        class_scores = pred[5:]   # 2 classes
+    for pred in output:
+        x, y, w, h, conf, class_id, _ = pred
+        class_id = int(class_id)
 
-        class_id = np.argmax(class_scores)
-        class_conf = class_scores[class_id]
-
-        confidence = obj_conf * class_conf
-
-        if confidence > CONF_THRESHOLD and class_id == RIPE_CLASS_ID:
-
-            xmin = int((x - bw/2) * w / IMG_SIZE)
-            ymin = int((y - bh/2) * h / IMG_SIZE)
-            xmax = int((x + bw/2) * w / IMG_SIZE)
-            ymax = int((y + bh/2) * h / IMG_SIZE)
+        if conf > CONF_THRESHOLD and class_id == RIPE_CLASS_ID:
+            xmin = int((x - w/2) * orig_w)
+            ymin = int((y - h/2) * orig_h)
+            xmax = int((x + w/2) * orig_w)
+            ymax = int((y + h/2) * orig_h)
 
             boxes.append([xmin, ymin, xmax - xmin, ymax - ymin])
-            scores.append(float(confidence))
+            scores.append(float(conf))
 
     # Apply NMS
-    indices = cv2.dnn.NMSBoxes(boxes, scores,
-                               CONF_THRESHOLD,
-                               NMS_THRESHOLD)
+    indices = cv2.dnn.NMSBoxes(boxes, scores, CONF_THRESHOLD, IOU_THRESHOLD)
 
     if len(indices) > 0:
         for i in indices.flatten():
             x, y, bw, bh = boxes[i]
-            conf = scores[i]
+            score = scores[i]
 
-            cv2.rectangle(original,
-                          (x, y),
-                          (x + bw, y + bh),
-                          (0, 255, 0), 2)
-
-            cv2.putText(original,
-                        f"RIPE {conf:.2f}",
+            cv2.rectangle(frame, (x, y), (x + bw, y + bh), (0, 255, 0), 2)
+            cv2.putText(frame,
+                        f"Ripe {score:.2f}",
                         (x, y - 10),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.6,
-                        (0, 255, 0), 2)
+                        (0, 255, 0),
+                        2)
 
-    cv2.imshow("Ripe Detection", original)
+    # FPS
+    curr_time = time.time()
+    fps = 1 / (curr_time - prev_time)
+    prev_time = curr_time
+
+    cv2.putText(frame, f"FPS: {int(fps)}",
+                (20, 40),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                (0, 0, 255),
+                2)
+
+    cv2.imshow("YOLO Ripeness Detection", frame)
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
