@@ -3,15 +3,24 @@ import numpy as np
 import tflite_runtime.interpreter as tflite
 
 # ==============================
-# LOAD MODEL
+# SETTINGS
 # ==============================
 MODEL_PATH = "best_float16.tflite"
 IMG_SIZE = 640
-CONF_THRESHOLD = 0.25
+CONF_THRESHOLD = 0.20
 NMS_THRESHOLD = 0.45
-RIPE_CLASS_ID = 1   # Change if your ripe class index is different
+RIPE_CLASS_ID = 1   # Change if needed (0 or 1 depending on dataset)
 
-print("Loading TFLite model...")
+# ==============================
+# SIGMOID FUNCTION
+# ==============================
+def sigmoid(x):
+    return 1 / (1 + np.exp(-x))
+
+# ==============================
+# LOAD MODEL
+# ==============================
+print("Loading model...")
 interpreter = tflite.Interpreter(model_path=MODEL_PATH)
 interpreter.allocate_tensors()
 
@@ -21,7 +30,7 @@ output_details = interpreter.get_output_details()
 print("Model Loaded ✅")
 
 # ==============================
-# SAFE CAMERA OPEN
+# OPEN CAMERA SAFELY
 # ==============================
 cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
 
@@ -44,31 +53,42 @@ while True:
     original = frame.copy()
     h, w, _ = frame.shape
 
-    # ------------------------------
+    # --------------------------
     # PREPROCESS
-    # ------------------------------
+    # --------------------------
     img = cv2.resize(frame, (IMG_SIZE, IMG_SIZE))
     img = img.astype(np.float32) / 255.0
     img = np.expand_dims(img, axis=0)
 
-    # ------------------------------
+    # --------------------------
     # INFERENCE
-    # ------------------------------
+    # --------------------------
     interpreter.set_tensor(input_details[0]['index'], img)
     interpreter.invoke()
     output = interpreter.get_tensor(output_details[0]['index'])
 
-    # Expected shape: (1, 7, 8400)
-    predictions = output[0].T  # shape becomes (8400, 7)
+    # --------------------------
+    # HANDLE OUTPUT SHAPE
+    # --------------------------
+    if output.shape[1] == 7:
+        predictions = output[0].T      # (8400,7)
+    else:
+        predictions = output[0]        # already (8400,7)
 
     boxes = []
     scores = []
 
-    # ------------------------------
-    # DECODE OUTPUT
-    # ------------------------------
+    # --------------------------
+    # DECODE PREDICTIONS
+    # --------------------------
     for pred in predictions:
+
         x, y, bw, bh, obj_conf, class0, class1 = pred
+
+        # Apply sigmoid (IMPORTANT for TFLite)
+        obj_conf = sigmoid(obj_conf)
+        class0 = sigmoid(class0)
+        class1 = sigmoid(class1)
 
         class_scores = np.array([class0, class1])
         class_id = np.argmax(class_scores)
@@ -91,38 +111,39 @@ while True:
             ])
             scores.append(float(confidence))
 
-    # ------------------------------
+    # --------------------------
     # APPLY NMS
-    # ------------------------------
-    indices = cv2.dnn.NMSBoxes(
-        boxes,
-        scores,
-        CONF_THRESHOLD,
-        NMS_THRESHOLD
-    )
+    # --------------------------
+    if len(boxes) > 0:
+        indices = cv2.dnn.NMSBoxes(
+            boxes,
+            scores,
+            CONF_THRESHOLD,
+            NMS_THRESHOLD
+        )
 
-    if len(indices) > 0:
-        for i in indices.flatten():
-            x, y, bw, bh = boxes[i]
-            conf = scores[i]
+        if len(indices) > 0:
+            for i in indices.flatten():
+                x, y, bw, bh = boxes[i]
+                conf = scores[i]
 
-            cv2.rectangle(
-                original,
-                (x, y),
-                (x + bw, y + bh),
-                (0, 255, 0),
-                2
-            )
+                cv2.rectangle(
+                    original,
+                    (x, y),
+                    (x + bw, y + bh),
+                    (0, 255, 0),
+                    2
+                )
 
-            cv2.putText(
-                original,
-                f"RIPE {conf:.2f}",
-                (x, y - 10),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                (0, 255, 0),
-                2
-            )
+                cv2.putText(
+                    original,
+                    f"RIPE {conf:.2f}",
+                    (x, y - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    (0, 255, 0),
+                    2
+                )
 
     cv2.imshow("Ripe Detection", original)
 
