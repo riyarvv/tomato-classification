@@ -21,7 +21,7 @@ cap = cv2.VideoCapture(0)
 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
 cv2.namedWindow("Tomato Detection", cv2.WINDOW_NORMAL)
-cv2.resizeWindow("Tomato Detection", 960, 720)
+cv2.resizeWindow("Tomato Detection", 1920, 1080)
 
 prev_time = 0
 
