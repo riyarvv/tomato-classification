@@ -34,7 +34,7 @@ LIMITS = {
     GRIPPER_CH:  {"close":15, "open":100}
 }
 
-CART_POSITION = 80  # Angle where cart is located
+CART_POSITION = 20  # Angle where cart is located
 
 # ==========================================
 # 4️⃣ SMOOTH MOVEMENT FUNCTION
@@ -112,7 +112,8 @@ cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
 # Let OpenCV auto-size window to frame
-cv2.namedWindow("Harvest Vision", cv2.WINDOW_AUTOSIZE)
+cv2.namedWindow("Harvest Vision", cv2.WINDOW_NORMAL)
+cv2.resizeWindow("Harvest Vision", 960, 720)
 
 # ==========================================
 # 9️⃣ SCANNING VARIABLES
@@ -246,6 +247,15 @@ try:
                             0.6,(0,255,0),2)
 
                 if is_centered and not locked:
+                    cv2.putText(frame, "TARGET LOCKED",
+                    (center_x-80, center_y-70),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.8,
+                    (0,255,255), 2)
+    
+                    cv2.imshow("Harvest Vision", frame)
+                    cv2.waitKey(1)
+                
                     print(f"🎯 Target locked at angle {scan_angle}")
                     locked = True
                     pick_and_drop()
