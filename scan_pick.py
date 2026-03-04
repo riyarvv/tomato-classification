@@ -8,248 +8,224 @@ from adafruit_motor import servo
 from tflite_runtime.interpreter import Interpreter
 
 # ==========================================
-# 1️⃣ PCA9685 INITIALIZATION
+# 1️⃣ MODEL SETTINGS
 # ==========================================
-i2c = busio.I2C(board.SCL, board.SDA)
-pca = PCA9685(i2c)
-pca.frequency = 50
+MODEL_PATH = "best_float16.tflite"
+CONF_THRESHOLD = 0.5
 
 # ==========================================
-# 2️⃣ CHANNEL MAPPING
+# 2️⃣ SERVO CHANNELS
 # ==========================================
-BASE_CH, SHOULDER_CH, ELBOW_CH, PITCH_CH, GRIPPER_CH, CAMERA_CH = 0,1,2,3,5,6
-
-servos = {}
-for ch in [BASE_CH, SHOULDER_CH, ELBOW_CH, PITCH_CH, GRIPPER_CH, CAMERA_CH]:
-    servos[ch] = servo.Servo(pca.channels[ch], min_pulse=500, max_pulse=2500)
+BASE_CH = 0
+SHOULDER_CH = 1
+ELBOW_CH = 2
+GRIPPER_CH = 3
+CAMERA_CH = 4
 
 # ==========================================
 # 3️⃣ SERVO LIMITS
 # ==========================================
 LIMITS = {
-    BASE_CH:     {"neutral":20, "min":10, "max":100},
-    SHOULDER_CH: {"neutral":125, "pick":115},
-    ELBOW_CH:    {"neutral":30,  "pick":50},
-    PITCH_CH:    {"neutral":90},
+    BASE_CH: {"min": 0, "max": 180, "neutral": 90},
+    SHOULDER_CH: {"min": 40, "max": 140, "neutral": 90, "pick": 130},
+    ELBOW_CH: {"min": 40, "max": 140, "neutral": 90, "pick": 60},
+    GRIPPER_CH: {"min": 15, "max": 120, "neutral": 15},
+    CAMERA_CH: {"min": 0, "max": 180, "neutral": 90},
 }
 
 # ==========================================
-# 4️⃣ SMOOTH MOVEMENT
+# 4️⃣ INITIALIZE PCA9685
 # ==========================================
-def move_slow(channel, target, delay=0.01):
-    current = servos[channel].angle
-    if current is None:
-        current = target
+i2c = busio.I2C(board.SCL, board.SDA)
+pca = PCA9685(i2c)
+pca.frequency = 50
 
-    current = int(current)
-    target = int(target)
-    step = 1 if target > current else -1
-
-    for angle in range(current, target + step, step):
-        servos[channel].angle = angle
-        time.sleep(delay)
+servos = [servo.Servo(pca.channels[i]) for i in range(5)]
 
 # ==========================================
-# 5️⃣ GRIPPER CONTROL (Very Slow)
+# 5️⃣ INITIAL POSITIONS
 # ==========================================
-def open_gripper(delay=1.5):
-    sequence = [15, 30, 45, 60, 75, 90, 100, 120]
-    for angle in sequence:
-        servos[GRIPPER_CH].angle = angle
-        time.sleep(delay)
-
-def close_gripper(delay=1.5):
-    sequence = [120, 100, 90, 75, 60, 45, 30, 15]
-    for angle in sequence:
-        servos[GRIPPER_CH].angle = angle
-        time.sleep(delay)
+for ch in LIMITS:
+    servos[ch].angle = LIMITS[ch]["neutral"]
 
 # ==========================================
-# 6️⃣ HOME POSITION
+# 6️⃣ LOAD MODEL
 # ==========================================
-def go_home():
-    move_slow(ELBOW_CH, LIMITS[ELBOW_CH]["neutral"])
-    move_slow(SHOULDER_CH, LIMITS[SHOULDER_CH]["neutral"])
-    move_slow(PITCH_CH, LIMITS[PITCH_CH]["neutral"])
-    move_slow(BASE_CH, LIMITS[BASE_CH]["neutral"])
-    servos[CAMERA_CH].angle = servos[BASE_CH].angle
-    servos[GRIPPER_CH].angle = 15
-
-# ==========================================
-# 7️⃣ PICK AND DROP LOGIC
-# ==========================================
-def pick_and_drop():
-
-    print("🍅 Picking from locked position...")
-
-    # 1️⃣ Move arm down (base locked)
-    move_slow(SHOULDER_CH, LIMITS[SHOULDER_CH]["pick"], delay=0.01)
-    move_slow(ELBOW_CH, LIMITS[ELBOW_CH]["pick"], delay=0.01)
-
-    # 2️⃣ Close gripper VERY slowly
-    close_gripper(delay=1.5)
-
-    print("⬆ Lifting tomato...")
-
-    # 3️⃣ Lift arm back up
-    move_slow(ELBOW_CH, LIMITS[ELBOW_CH]["neutral"], delay=0.01)
-    move_slow(SHOULDER_CH, LIMITS[SHOULDER_CH]["neutral"], delay=0.01)
-
-    print("🔄 Moving base to neutral VERY slowly...")
-
-    # 4️⃣ Move base + camera together VERY slowly
-    target = LIMITS[BASE_CH]["neutral"]
-    current = int(servos[BASE_CH].angle)
-    step = 1 if target > current else -1
-
-    for angle in range(current, target + step, step):
-        servos[BASE_CH].angle = angle
-        servos[CAMERA_CH].angle = angle
-        time.sleep(0.03)
-
-    print("📦 Dropping tomato VERY slowly...")
-
-    # 5️⃣ Open gripper VERY slowly
-    open_gripper(delay=1.5)
-
-    print("✅ Pick & Drop complete")
-
-# ==========================================
-# 8️⃣ LOAD YOLO TFLITE MODEL
-# ==========================================
-MODEL_PATH = "best_float16.tflite"
-CONF_THRESHOLD = 0.25
-IOU_THRESHOLD = 0.45
-RIPE_CLASS_ID = 2
-
-interpreter = Interpreter(model_path=MODEL_PATH, num_threads=4)
+interpreter = Interpreter(model_path=MODEL_PATH)
 interpreter.allocate_tensors()
 
 input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
 
-input_h = input_details[0]['shape'][1]
-input_w = input_details[0]['shape'][2]
+_, in_h, in_w, _ = input_details[0]["shape"]
 
 # ==========================================
-# 9️⃣ CAMERA
+# 7️⃣ HELPER FUNCTIONS
+# ==========================================
+
+def move_slow(channel, target, delay=0.01):
+    current = int(servos[channel].angle)
+    step = 1 if target > current else -1
+    for angle in range(current, target + step, step):
+        servos[channel].angle = angle
+        time.sleep(delay)
+
+
+def close_gripper(delay=1.5):  # Arduino-like slow
+    sequence = [15, 30, 45, 60, 75, 90, 100, 120]
+    for angle in sequence:
+        servos[GRIPPER_CH].angle = angle
+        time.sleep(delay)
+
+
+def open_gripper(delay=1.5):
+    sequence = [120, 100, 90, 75, 60, 45, 30, 15]
+    for angle in sequence:
+        servos[GRIPPER_CH].angle = angle
+        time.sleep(delay)
+
+
+def move_base_camera_slow(target):
+    current = int(servos[BASE_CH].angle)
+    step = 1 if target > current else -1
+    for angle in range(current, target + step, step):
+        servos[BASE_CH].angle = angle
+        servos[CAMERA_CH].angle = angle
+        time.sleep(0.03)
+
+
+def pick_and_drop():
+    print("🍅 Picking...")
+
+    # Move arm down
+    move_slow(SHOULDER_CH, LIMITS[SHOULDER_CH]["pick"], 0.01)
+    move_slow(ELBOW_CH, LIMITS[ELBOW_CH]["pick"], 0.01)
+
+    # Close gripper slowly
+    close_gripper()
+
+    print("⬆ Lifting...")
+
+    # Lift back to neutral
+    move_slow(ELBOW_CH, LIMITS[ELBOW_CH]["neutral"], 0.01)
+    move_slow(SHOULDER_CH, LIMITS[SHOULDER_CH]["neutral"], 0.01)
+
+    print("🔄 Moving to drop position...")
+
+    # Move base + camera to neutral very slowly
+    move_base_camera_slow(LIMITS[BASE_CH]["neutral"])
+
+    print("📦 Dropping slowly...")
+
+    open_gripper()
+
+    print("✅ Done")
+
+# ==========================================
+# 8️⃣ CAMERA
 # ==========================================
 cap = cv2.VideoCapture(0)
-cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
-cv2.namedWindow("Harvest Vision", cv2.WINDOW_NORMAL)
-cv2.resizeWindow("Harvest Vision", 960, 720)
-
-go_home()
-
-# ==========================================
-# 🔟 SCANNING VARIABLES
-# ==========================================
 scan_angle = LIMITS[BASE_CH]["neutral"]
 scan_direction = 1
 locked = False
-prev_time = 0
+
+print("🚀 Starting scan...")
 
 # ==========================================
-# 🔄 MAIN LOOP
+# 9️⃣ MAIN LOOP
 # ==========================================
-try:
-    while True:
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        break
 
-        # 🔄 SCANNING
-        if not locked:
-            scan_angle += scan_direction
+    frame_h, frame_w = frame.shape[:2]
 
-            if scan_angle >= LIMITS[BASE_CH]["max"] or scan_angle <= LIMITS[BASE_CH]["min"]:
-                scan_direction *= -1
+    # Preprocess
+    resized = cv2.resize(frame, (in_w, in_h))
+    input_data = np.expand_dims(resized.astype(np.float32) / 255.0, axis=0)
 
-            servos[BASE_CH].angle = scan_angle
-            servos[CAMERA_CH].angle = scan_angle
-            time.sleep(0.005)
+    interpreter.set_tensor(input_details[0]["index"], input_data)
+    interpreter.invoke()
+    output_data = interpreter.get_tensor(output_details[0]["index"])[0]
 
-        # 📷 FRAME
-        ret, frame = cap.read()
-        if not ret:
-            break
+    boxes = []
+    scores = []
+    centers = []
 
-        orig_h, orig_w = frame.shape[:2]
-        center_x, center_y = orig_w//2, orig_h//2
+    for detection in output_data:
+        conf = detection[4]
+        if conf > CONF_THRESHOLD:
+            cx = int(detection[0] * frame_w)
+            cy = int(detection[1] * frame_h)
+            bw = int(detection[2] * frame_w)
+            bh = int(detection[3] * frame_h)
 
-        zone_size = 120
-        zone_left = center_x - zone_size//2
-        zone_right = center_x + zone_size//2
-        zone_top = center_y - zone_size//2
-        zone_bottom = center_y + zone_size//2
+            x = int(cx - bw / 2)
+            y = int(cy - bh / 2)
 
-        cv2.rectangle(frame,(zone_left,zone_top),
-                      (zone_right,zone_bottom),
-                      (255,255,255),1)
+            boxes.append([x, y, bw, bh])
+            scores.append(float(conf))
+            centers.append((cx, cy))
 
-        # -------- YOLO PREPROCESS --------
-        img = cv2.resize(frame,(input_w,input_h))
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        img = img.astype(np.float32)/255.0
-        img = np.expand_dims(img,axis=0)
+    indices = cv2.dnn.NMSBoxes(boxes, scores, CONF_THRESHOLD, 0.4)
 
-        interpreter.set_tensor(input_details[0]['index'], img)
-        interpreter.invoke()
+    # Draw detection zone
+    zone_left = frame_w // 2 - 50
+    zone_right = frame_w // 2 + 50
+    zone_top = frame_h // 2 - 50
+    zone_bottom = frame_h // 2 + 50
 
-        output = interpreter.get_tensor(output_details[0]['index'])[0]
-        output = output.T
+    cv2.rectangle(frame, (zone_left, zone_top),
+                  (zone_right, zone_bottom), (255, 0, 0), 2)
 
-        boxes = []
-        scores = []
-        centers = []
+    if len(indices) > 0:
+        for idx in indices.flatten():
 
-        for pred in output:
-            x,y,w,h = pred[:4]
-            class_scores = pred[4:]
+            x, y, bw, bh = boxes[idx]
+            score = scores[idx]
+            cx, cy = centers[idx]
 
-            class_id = int(np.argmax(class_scores))
-            confidence = class_scores[class_id]
+            # Draw box
+            cv2.rectangle(frame, (x, y), (x + bw, y + bh),
+                          (0, 255, 0), 2)
+            cv2.circle(frame, (cx, cy), 5, (0, 255, 0), -1)
+            cv2.putText(frame, f"Ripe {score:.2f}",
+                        (x, y - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6, (0, 255, 0), 2)
 
-            if confidence > CONF_THRESHOLD and class_id == RIPE_CLASS_ID:
+            is_centered = (
+                zone_left < cx < zone_right and
+                zone_top < cy < zone_bottom
+            )
 
-                xmin = int((x - w/2) * orig_w)
-                ymin = int((y - h/2) * orig_h)
-                xmax = int((x + w/2) * orig_w)
-                ymax = int((y + h/2) * orig_h)
+            if is_centered and not locked:
+                print(f"🎯 Locked at {scan_angle}")
+                locked = True
 
-                boxes.append([xmin,ymin,xmax-xmin,ymax-ymin])
-                scores.append(float(confidence))
-                centers.append((int(x*orig_w), int(y*orig_h)))
+                pick_and_drop()
 
-        indices = cv2.dnn.NMSBoxes(boxes, scores,
-                                   CONF_THRESHOLD, IOU_THRESHOLD)
+                scan_angle = LIMITS[BASE_CH]["neutral"]
+                locked = False
+                break
 
-        if len(indices) > 0:
-            for idx in indices.flatten():
+    # SCANNING (only if not locked)
+    if not locked:
+        servos[BASE_CH].angle = scan_angle
+        servos[CAMERA_CH].angle = scan_angle
 
-                cx,cy = centers[idx]
+        scan_angle += scan_direction
 
-                is_centered = (
-                    zone_left < cx < zone_right and
-                    zone_top < cy < zone_bottom
-                )
+        if scan_angle >= LIMITS[BASE_CH]["max"] or \
+           scan_angle <= LIMITS[BASE_CH]["min"]:
+            scan_direction *= -1
 
-                if is_centered and not locked:
-                    print(f"🎯 Target locked at angle {scan_angle}")
-                    locked = True
+    cv2.imshow("Tomato Detection", frame)
 
-                    pick_and_drop()
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
 
-                    # Restart scanning from neutral
-                    scan_angle = LIMITS[BASE_CH]["neutral"]
-
-                    locked = False
-                    break
-
-        cv2.imshow("Harvest Vision",frame)
-
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-
-finally:
-    cap.release()
-    cv2.destroyAllWindows()
-    pca.deinit()
+cap.release()
+cv2.destroyAllWindows()
