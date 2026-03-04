@@ -34,7 +34,7 @@ LIMITS = {
     GRIPPER_CH:  {"close":15, "open":100}
 }
 
-CART_POSITION = 20   # Angle where cart is located
+CART_POSITION = 80  # Angle where cart is located
 
 # ==========================================
 # 4️⃣ SMOOTH MOVEMENT FUNCTION
