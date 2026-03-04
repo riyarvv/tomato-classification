@@ -27,16 +27,20 @@ for ch in [BASE_CH, SHOULDER_CH, ELBOW_CH, PITCH_CH, GRIPPER_CH, CAMERA_CH]:
 # 3️⃣ SERVO LIMITS
 # ==========================================
 LIMITS = {
-    BASE_CH:     {"neutral":20, "min":10, "max":100, "pick":40},
+    BASE_CH:     {"min":10, "max":100},
     SHOULDER_CH: {"neutral":125, "pick":115},
     ELBOW_CH:    {"neutral":30,  "pick":50},
     PITCH_CH:    {"neutral":90},
+    GRIPPER_CH:  {"open":15, "close":100}
 }
 
+CART_POSITION = 80   # Angle where cart is located
+
 # ==========================================
-# 4️⃣ SMOOTH MOVEMENT
+# 4️⃣ SMOOTH MOVEMENT FUNCTION
 # ==========================================
-def move_slow(channel, target, delay=0.01):
+def move_smooth(channel, target, step=1, delay=0.03):
+
     current = servos[channel].angle
     if current is None:
         current = target
@@ -44,69 +48,42 @@ def move_slow(channel, target, delay=0.01):
     current = int(current)
     target = int(target)
 
-    step = 1 if target > current else -1
+    if current < target:
+        angles = range(current, target + 1, step)
+    else:
+        angles = range(current, target - 1, -step)
 
-    for angle in range(current, target + step, step):
+    for angle in angles:
         servos[channel].angle = angle
         time.sleep(delay)
 
 # ==========================================
-# 5️⃣ SAFE GRIPPER SEQUENCE
+# 5️⃣ GRIPPER STEP MOVEMENT (ARDUINO STYLE)
 # ==========================================
-def smooth_gripper_sequence(delay=1.5):
-    sequence = [15, 30, 45, 60, 75, 90, 100, 120,
-                100, 90, 75, 60, 45, 30, 15]
-
-    for angle in sequence:
+def gripper_close_slow():
+    steps = [15, 30, 45, 60, 75, 90, 100]
+    for angle in steps:
         servos[GRIPPER_CH].angle = angle
-        time.sleep(delay)
+        time.sleep(1.5)
+
+def gripper_open_slow():
+    steps = [100, 90, 75, 60, 45, 30, 15]
+    for angle in steps:
+        servos[GRIPPER_CH].angle = angle
+        time.sleep(1.5)
 
 # ==========================================
-# 6️⃣ HOME POSITION
+# 6️⃣ INITIAL POSITION
 # ==========================================
-def go_home():
-    move_slow(ELBOW_CH, LIMITS[ELBOW_CH]["neutral"])
-    move_slow(SHOULDER_CH, LIMITS[SHOULDER_CH]["neutral"])
-    move_slow(PITCH_CH, LIMITS[PITCH_CH]["neutral"])
-    move_slow(BASE_CH, LIMITS[BASE_CH]["neutral"])
-    move_slow(GRIPPER_CH, 15, delay=0.02)
-    servos[CAMERA_CH].angle = servos[BASE_CH].angle
-
-# ==========================================
-# 7️⃣ PICK SEQUENCE
-# ==========================================
-def pick_and_drop(current_base_angle):
-
-    print("🍅 Picking from locked position...")
-
-    # Move shoulder and elbow down (base stays locked)
-    move_slow(SHOULDER_CH, LIMITS[SHOULDER_CH]["pick"], delay=0.01)
-    move_slow(ELBOW_CH, LIMITS[ELBOW_CH]["pick"], delay=0.01)
-
-    # Slow gripper close
-    smooth_gripper_sequence()
-
-    print("⬆ Lifting tomato...")
-
-    # Lift back up (base still locked)
-    move_slow(ELBOW_CH, LIMITS[ELBOW_CH]["neutral"], delay=0.01)
-    move_slow(SHOULDER_CH, LIMITS[SHOULDER_CH]["neutral"], delay=0.01)
-
-    print("🔄 Moving to drop position slowly...")
-
-    # VERY SLOW base return to neutral
-    move_slow(BASE_CH, LIMITS[BASE_CH]["neutral"], delay=0.03)
-    servos[CAMERA_CH].angle = servos[BASE_CH].angle
-
-    print("📦 Dropping tomato slowly...")
-
-    # Slowly open (reverse sequence effect)
-    smooth_gripper_sequence()
-
-    print("✅ Pick & Drop complete")
+move_smooth(BASE_CH, 20)
+move_smooth(SHOULDER_CH, LIMITS[SHOULDER_CH]["neutral"])
+move_smooth(ELBOW_CH, LIMITS[ELBOW_CH]["neutral"])
+move_smooth(PITCH_CH, LIMITS[PITCH_CH]["neutral"])
+servos[GRIPPER_CH].angle = LIMITS[GRIPPER_CH]["open"]
+servos[CAMERA_CH].angle = servos[BASE_CH].angle
 
 # ==========================================
-# 8️⃣ LOAD YOLO TFLITE MODEL
+# 7️⃣ LOAD YOLO TFLITE MODEL
 # ==========================================
 MODEL_PATH = "best_float16.tflite"
 CONF_THRESHOLD = 0.25
@@ -123,7 +100,7 @@ input_h = input_details[0]['shape'][1]
 input_w = input_details[0]['shape'][2]
 
 # ==========================================
-# 9️⃣ CAMERA
+# 8️⃣ CAMERA
 # ==========================================
 cap = cv2.VideoCapture(0)
 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
@@ -131,15 +108,44 @@ cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 cv2.namedWindow("Harvest Vision", cv2.WINDOW_NORMAL)
 cv2.resizeWindow("Harvest Vision", 960, 720)
 
-go_home()
-
 # ==========================================
-# 🔟 SCANNING VARIABLES
+# 9️⃣ SCANNING VARIABLES
 # ==========================================
-scan_angle = LIMITS[BASE_CH]["min"]
+scan_angle = 20
 scan_direction = 1
 locked = False
 prev_time = 0
+
+# ==========================================
+# 🔄 PICK FUNCTION
+# ==========================================
+def pick_and_drop():
+    global scan_angle
+
+    print("🍅 Picking Ripe Tomato...")
+
+    # Move arm down slowly
+    move_smooth(SHOULDER_CH, LIMITS[SHOULDER_CH]["pick"])
+    move_smooth(ELBOW_CH, LIMITS[ELBOW_CH]["pick"])
+
+    # Close gripper slowly
+    gripper_close_slow()
+    time.sleep(1)
+
+    # Lift slowly
+    move_smooth(ELBOW_CH, LIMITS[ELBOW_CH]["neutral"])
+    move_smooth(SHOULDER_CH, LIMITS[SHOULDER_CH]["neutral"])
+
+    # Move to cart
+    move_smooth(BASE_CH, CART_POSITION)
+    servos[CAMERA_CH].angle = servos[BASE_CH].angle
+    scan_angle = CART_POSITION
+
+    # Open slowly
+    gripper_open_slow()
+    time.sleep(1)
+
+    print("✅ Pick Complete")
 
 # ==========================================
 # 🔄 MAIN LOOP
@@ -147,17 +153,19 @@ prev_time = 0
 try:
     while True:
 
-        # 🔄 SAFE SCANNING
+        # ===== SCANNING =====
         if not locked:
-            scan_angle += scan_direction
+
+            scan_angle += scan_direction * 1
 
             if scan_angle >= LIMITS[BASE_CH]["max"] or scan_angle <= LIMITS[BASE_CH]["min"]:
                 scan_direction *= -1
 
-            move_slow(BASE_CH, scan_angle, delay=0.005)
+            move_smooth(BASE_CH, scan_angle, step=1, delay=0.02)
             servos[CAMERA_CH].angle = servos[BASE_CH].angle
+            time.sleep(0.05)
 
-        # 📷 FRAME
+        # ===== CAMERA FRAME =====
         ret, frame = cap.read()
         if not ret:
             break
@@ -175,7 +183,7 @@ try:
                       (zone_right,zone_bottom),
                       (255,255,255),1)
 
-        # -------- YOLO PREPROCESS --------
+        # ===== YOLO PREPROCESS =====
         img = cv2.resize(frame,(input_w,input_h))
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         img = img.astype(np.float32)/255.0
@@ -234,17 +242,12 @@ try:
                 if is_centered and not locked:
                     print(f"🎯 Target locked at angle {scan_angle}")
                     locked = True
-
-                    pick_and_drop(scan_angle)
-
-                    # Reset scanning from neutral
-                    scan_angle = LIMITS[BASE_CH]["neutral"]
-
-                    time.sleep(1)
+                    pick_and_drop()
+                    time.sleep(2)
                     locked = False
                     break
 
-        # FPS
+        # ===== FPS =====
         curr_time = time.time()
         fps = 1/(curr_time-prev_time+1e-5)
         prev_time = curr_time
