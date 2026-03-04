@@ -103,10 +103,16 @@ input_w = input_details[0]['shape'][2]
 # 8️⃣ CAMERA
 # ==========================================
 cap = cv2.VideoCapture(0)
+
+# Set camera resolution (better FPS & no stretching)
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+
+# Reduce lag
 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
-cv2.namedWindow("Harvest Vision", cv2.WINDOW_NORMAL)
-cv2.resizeWindow("Harvest Vision", 960, 720)
+# Let OpenCV auto-size window to frame
+cv2.namedWindow("Harvest Vision", cv2.WINDOW_AUTOSIZE)
 
 # ==========================================
 # 9️⃣ SCANNING VARIABLES
