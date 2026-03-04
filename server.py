@@ -19,6 +19,14 @@ tomato_count = 0
 def get_count():
     return {"count": tomato_count}
 
+@app.route('/reset')
+def reset():
+    global tomato_count
+    tomato_count = 0
+    ser.write(b'Z')   # Z = Reset command to ESP32
+    print("System Reset to 0")
+    return {"status": "reset"}
+
 
 # ================================
 # SERIAL LISTENER THREAD (IMPORTANT)
