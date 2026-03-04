@@ -31,7 +31,7 @@ LIMITS = {
     SHOULDER_CH: {"neutral":125, "pick":115},
     ELBOW_CH:    {"neutral":30,  "pick":50},
     PITCH_CH:    {"neutral":90},
-    GRIPPER_CH:  {"open":15, "close":100}
+    GRIPPER_CH:  {"close":15, "open":100}
 }
 
 CART_POSITION = 20   # Angle where cart is located
