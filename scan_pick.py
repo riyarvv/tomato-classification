@@ -53,7 +53,7 @@ def move_slow(channel, target, delay=0.01):
 # ==========================================
 # 5️⃣ SAFE GRIPPER SEQUENCE
 # ==========================================
-def smooth_gripper_sequence(delay=0.04):
+def smooth_gripper_sequence(delay=1.5):
     sequence = [15, 30, 45, 60, 75, 90, 100, 120,
                 100, 90, 75, 60, 45, 30, 15]
 
@@ -75,21 +75,35 @@ def go_home():
 # ==========================================
 # 7️⃣ PICK SEQUENCE
 # ==========================================
-def pick_and_drop():
-    print("🍅 Picking Ripe Tomato...")
+def pick_and_drop(current_base_angle):
 
-    move_slow(BASE_CH, LIMITS[BASE_CH]["pick"], delay=0.01)
+    print("🍅 Picking from locked position...")
+
+    # Move shoulder and elbow down (base stays locked)
     move_slow(SHOULDER_CH, LIMITS[SHOULDER_CH]["pick"], delay=0.01)
     move_slow(ELBOW_CH, LIMITS[ELBOW_CH]["pick"], delay=0.01)
 
-    smooth_gripper_sequence(delay=0.04)
-    time.sleep(0.5)
+    # Slow gripper close
+    smooth_gripper_sequence()
 
+    print("⬆ Lifting tomato...")
+
+    # Lift back up (base still locked)
     move_slow(ELBOW_CH, LIMITS[ELBOW_CH]["neutral"], delay=0.01)
     move_slow(SHOULDER_CH, LIMITS[SHOULDER_CH]["neutral"], delay=0.01)
-    move_slow(BASE_CH, LIMITS[BASE_CH]["neutral"], delay=0.01)
 
-    print("✅ Pick complete")
+    print("🔄 Moving to drop position slowly...")
+
+    # VERY SLOW base return to neutral
+    move_slow(BASE_CH, LIMITS[BASE_CH]["neutral"], delay=0.03)
+    servos[CAMERA_CH].angle = servos[BASE_CH].angle
+
+    print("📦 Dropping tomato slowly...")
+
+    # Slowly open (reverse sequence effect)
+    smooth_gripper_sequence()
+
+    print("✅ Pick & Drop complete")
 
 # ==========================================
 # 8️⃣ LOAD YOLO TFLITE MODEL
@@ -221,12 +235,10 @@ try:
                     print(f"🎯 Target locked at angle {scan_angle}")
                     locked = True
 
-                    pick_and_drop()
+                    pick_and_drop(scan_angle)
 
-                    # Smooth restart scanning
+                    # Reset scanning from neutral
                     scan_angle = LIMITS[BASE_CH]["neutral"]
-                    move_slow(BASE_CH, scan_angle, delay=0.01)
-                    servos[CAMERA_CH].angle = scan_angle
 
                     time.sleep(1)
                     locked = False
