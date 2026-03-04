@@ -31,13 +31,12 @@ LIMITS = {
     SHOULDER_CH: {"neutral":125, "pick":115},
     ELBOW_CH:    {"neutral":30,  "pick":50},
     PITCH_CH:    {"neutral":90},
-    GRIPPER_CH:  {"open":170, "close":20}
 }
 
 # ==========================================
 # 4️⃣ SMOOTH MOVEMENT
 # ==========================================
-def move_slow(channel, target, delay=0.02):
+def move_slow(channel, target, delay=0.01):
     current = servos[channel].angle
     if current is None:
         current = target
@@ -52,38 +51,48 @@ def move_slow(channel, target, delay=0.02):
         time.sleep(delay)
 
 # ==========================================
-# 5️⃣ HOME POSITION
+# 5️⃣ SAFE GRIPPER SEQUENCE
+# ==========================================
+def smooth_gripper_sequence(delay=0.04):
+    sequence = [15, 30, 45, 60, 75, 90, 100, 120,
+                100, 90, 75, 60, 45, 30, 15]
+
+    for angle in sequence:
+        servos[GRIPPER_CH].angle = angle
+        time.sleep(delay)
+
+# ==========================================
+# 6️⃣ HOME POSITION
 # ==========================================
 def go_home():
-    move_slow(GRIPPER_CH, LIMITS[GRIPPER_CH]["open"])
     move_slow(ELBOW_CH, LIMITS[ELBOW_CH]["neutral"])
     move_slow(SHOULDER_CH, LIMITS[SHOULDER_CH]["neutral"])
     move_slow(PITCH_CH, LIMITS[PITCH_CH]["neutral"])
     move_slow(BASE_CH, LIMITS[BASE_CH]["neutral"])
+    move_slow(GRIPPER_CH, 15, delay=0.02)
     servos[CAMERA_CH].angle = servos[BASE_CH].angle
 
 # ==========================================
-# 6️⃣ PICK SEQUENCE
+# 7️⃣ PICK SEQUENCE
 # ==========================================
 def pick_and_drop():
     print("🍅 Picking Ripe Tomato...")
 
-    move_slow(BASE_CH, LIMITS[BASE_CH]["pick"])
-    move_slow(SHOULDER_CH, LIMITS[SHOULDER_CH]["pick"])
-    move_slow(ELBOW_CH, LIMITS[ELBOW_CH]["pick"])
-    move_slow(GRIPPER_CH, LIMITS[GRIPPER_CH]["close"], delay=0.01)
-    time.sleep(1)
+    move_slow(BASE_CH, LIMITS[BASE_CH]["pick"], delay=0.01)
+    move_slow(SHOULDER_CH, LIMITS[SHOULDER_CH]["pick"], delay=0.01)
+    move_slow(ELBOW_CH, LIMITS[ELBOW_CH]["pick"], delay=0.01)
 
-    move_slow(ELBOW_CH, LIMITS[ELBOW_CH]["neutral"])
-    move_slow(SHOULDER_CH, LIMITS[SHOULDER_CH]["neutral"])
-    move_slow(BASE_CH, LIMITS[BASE_CH]["neutral"])
-    move_slow(GRIPPER_CH, LIMITS[GRIPPER_CH]["open"])
+    smooth_gripper_sequence(delay=0.04)
+    time.sleep(0.5)
 
-    go_home()
+    move_slow(ELBOW_CH, LIMITS[ELBOW_CH]["neutral"], delay=0.01)
+    move_slow(SHOULDER_CH, LIMITS[SHOULDER_CH]["neutral"], delay=0.01)
+    move_slow(BASE_CH, LIMITS[BASE_CH]["neutral"], delay=0.01)
+
     print("✅ Pick complete")
 
 # ==========================================
-# 7️⃣ LOAD YOLO TFLITE MODEL
+# 8️⃣ LOAD YOLO TFLITE MODEL
 # ==========================================
 MODEL_PATH = "best_float16.tflite"
 CONF_THRESHOLD = 0.25
@@ -100,7 +109,7 @@ input_h = input_details[0]['shape'][1]
 input_w = input_details[0]['shape'][2]
 
 # ==========================================
-# 8️⃣ CAMERA
+# 9️⃣ CAMERA
 # ==========================================
 cap = cv2.VideoCapture(0)
 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
@@ -111,7 +120,7 @@ cv2.resizeWindow("Harvest Vision", 960, 720)
 go_home()
 
 # ==========================================
-# 9️⃣ SCANNING VARIABLES
+# 🔟 SCANNING VARIABLES
 # ==========================================
 scan_angle = LIMITS[BASE_CH]["min"]
 scan_direction = 1
@@ -124,14 +133,14 @@ prev_time = 0
 try:
     while True:
 
-        # 🔄 SCANNING (only if not locked)
+        # 🔄 SAFE SCANNING
         if not locked:
             scan_angle += scan_direction
 
             if scan_angle >= LIMITS[BASE_CH]["max"] or scan_angle <= LIMITS[BASE_CH]["min"]:
                 scan_direction *= -1
 
-            move_slow(BASE_CH, scan_angle, delay=0.001)
+            move_slow(BASE_CH, scan_angle, delay=0.005)
             servos[CAMERA_CH].angle = servos[BASE_CH].angle
 
         # 📷 FRAME
@@ -214,7 +223,12 @@ try:
 
                     pick_and_drop()
 
-                    time.sleep(2)
+                    # Smooth restart scanning
+                    scan_angle = LIMITS[BASE_CH]["neutral"]
+                    move_slow(BASE_CH, scan_angle, delay=0.01)
+                    servos[CAMERA_CH].angle = scan_angle
+
+                    time.sleep(1)
                     locked = False
                     break
 
