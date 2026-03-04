@@ -43,6 +43,10 @@ def camera_feed():
     _, buffer = cv2.imencode('.jpg', frame)
     return Response(buffer.tobytes(), mimetype='image/jpeg')
 
+@app.route("/")
+def home():
+    return "Agribot Server Running"
+
 
 # ================================
 # COUNT ROUTE
@@ -113,4 +117,4 @@ if __name__ == "__main__":
     serial_thread.daemon = True
     serial_thread.start()
 
-    app.run(host="192.168.7.65", port=5000)
+    app.run(host="0.0.0.0", port=5000)
