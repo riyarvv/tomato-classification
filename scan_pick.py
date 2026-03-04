@@ -34,7 +34,7 @@ LIMITS = {
     GRIPPER_CH:  {"open":15, "close":100}
 }
 
-CART_POSITION = 80   # Angle where cart is located
+CART_POSITION = 20   # Angle where cart is located
 
 # ==========================================
 # 4️⃣ SMOOTH MOVEMENT FUNCTION
@@ -60,13 +60,13 @@ def move_smooth(channel, target, step=1, delay=0.03):
 # ==========================================
 # 5️⃣ GRIPPER STEP MOVEMENT (ARDUINO STYLE)
 # ==========================================
-def gripper_close_slow():
+def gripper_open_slow():
     steps = [15, 30, 45, 60, 75, 90, 100]
     for angle in steps:
         servos[GRIPPER_CH].angle = angle
         time.sleep(1.5)
 
-def gripper_open_slow():
+def gripper_close_slow():
     steps = [100, 90, 75, 60, 45, 30, 15]
     for angle in steps:
         servos[GRIPPER_CH].angle = angle
