@@ -52,13 +52,13 @@ def move_slow(channel, target, delay=0.01):
 # ==========================================
 # 5️⃣ GRIPPER CONTROL (Very Slow)
 # ==========================================
-def close_gripper(delay=1.5):
+def open_gripper(delay=1.5):
     sequence = [15, 30, 45, 60, 75, 90, 100, 120]
     for angle in sequence:
         servos[GRIPPER_CH].angle = angle
         time.sleep(delay)
 
-def open_gripper(delay=1.5):
+def close_gripper(delay=1.5):
     sequence = [120, 100, 90, 75, 60, 45, 30, 15]
     for angle in sequence:
         servos[GRIPPER_CH].angle = angle
