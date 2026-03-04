@@ -160,7 +160,7 @@ def pick():
     if scan_process is None:
         print("Starting scan_pick.py...")
         scan_process = subprocess.Popen(
-            ["python3", "scan_pick.py"]
+            ["python", "scan_pick.py"]
         )
         return "Harvesting Started"
     else:
