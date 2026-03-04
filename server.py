@@ -15,6 +15,10 @@ camera = cv2.VideoCapture(0)
 harvesting = False
 tomato_count = 0
 
+@app.route("/count")
+def get_count():
+    return {"count": tomato_count}
+
 
 # ================================
 # SERIAL LISTENER THREAD (IMPORTANT)
@@ -47,13 +51,6 @@ def camera_feed():
 def home():
     return "Agribot Server Running"
 
-
-# ================================
-# COUNT ROUTE
-# ================================
-@app.route('/count')
-def count():
-    return str(tomato_count)
 
 
 # ================================
