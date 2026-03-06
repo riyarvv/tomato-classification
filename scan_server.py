@@ -60,7 +60,7 @@ def reset():
 # ================================
 @app.route('/video_feed')
 def video_feed():
-    return redirect("http://192.168.3.140:5001/video_feed")
+    return redirect("http://raspberrypi.local:5001/video_feed")
 
 # ================================
 # HOME
