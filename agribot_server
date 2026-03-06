@@ -3,9 +3,9 @@ Description=Agribot Server
 After=network.target
 
 [Service]
-User=pi
-WorkingDirectory=/home/pi/agribot
-ExecStart=/usr/bin/python3 /home/pi/agribot/scan_server.py
+User=rslvpi5
+WorkingDirectory=/home/rslvpi5/tomato-detection/tomato-classification
+ExecStart=/usr/bin/python3/home/rslvpi5/tomato-detection/tomato-classification/scan_server.py
 Restart=always
 
 [Install]
