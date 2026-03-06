@@ -3,6 +3,7 @@ import serial
 import threading
 import subprocess
 import cv2
+from flask import redirect
 
 app = Flask(__name__)
 
@@ -57,6 +58,9 @@ def reset():
 # ================================
 # VIDEO STREAM
 # ================================
+@app.route('/video_feed')
+def video_feed():
+    return redirect("http://localhost:5001/video_feed")
 
 # ================================
 # HOME
