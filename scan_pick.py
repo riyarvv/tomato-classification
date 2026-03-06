@@ -109,9 +109,9 @@ input_w = input_details[0]['shape'][2]
 # ==========================================
 cap = cv2.VideoCapture(0)
 
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
+cap.set(cv2.CAP_PROP_FPS, 30)
 
 # shared frame for streaming
 output_frame = None
@@ -130,7 +130,7 @@ def generate_frames():
             if output_frame is None:
                 continue
 
-            ret, buffer = cv2.imencode('.jpg', output_frame)
+            ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
             frame = buffer.tobytes()
 
         yield (b'--frame\r\n'
@@ -190,6 +190,7 @@ def pick_and_drop():
 # MAIN LOOP
 # ==========================================
 try:
+    frame_count = 0
     while True:
 
         if not locked:
@@ -204,8 +205,14 @@ try:
             time.sleep(0.05)
 
         ret, frame = cap.read()
+
         if not ret:
             break
+    
+        frame_count += 1
+    
+        if frame_count % 4 != 0:
+            continue
 
         orig_h, orig_w = frame.shape[:2]
         center_x, center_y = orig_w//2, orig_h//2
