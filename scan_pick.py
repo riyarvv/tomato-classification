@@ -128,9 +128,10 @@ def generate_frames():
 
         with lock:
             if output_frame is None:
+                time.sleep(0.01)
                 continue
 
-            ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
+            ret, buffer = cv2.imencode('.jpg', output_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
             frame = buffer.tobytes()
 
         yield (b'--frame\r\n'
@@ -205,13 +206,15 @@ try:
             time.sleep(0.05)
 
         ret, frame = cap.read()
-
         if not ret:
             break
     
         frame_count += 1
     
+        # Skip frames to speed up detection
         if frame_count % 4 != 0:
+            with lock:
+                output_frame = frame.copy()
             continue
 
         orig_h, orig_w = frame.shape[:2]
