@@ -1,35 +1,24 @@
-from flask import Flask, Response
+from flask import Flask
 import serial
-import cv2
 import threading
+import subprocess
 
 app = Flask(__name__)
 
-# ===== SERIAL CONNECTION =====
+# ================================
+# SERIAL CONNECTION (ESP32)
+# ================================
 ser = serial.Serial('/dev/ttyACM0', 115200, timeout=1)
 
-# ===== CAMERA =====
-camera = cv2.VideoCapture(0)
-
-# ===== GLOBAL VARIABLES =====
+# ================================
+# GLOBAL VARIABLES
+# ================================
 harvesting = False
 tomato_count = 0
-
-@app.route("/count")
-def get_count():
-    return {"count": tomato_count}
-
-@app.route('/reset')
-def reset():
-    global tomato_count
-    tomato_count = 0
-    ser.write(b'Z')   # Z = Reset command to ESP32
-    print("System Reset to 0")
-    return {"status": "reset"}
-
+scan_process = None
 
 # ================================
-# SERIAL LISTENER THREAD (IMPORTANT)
+# SERIAL LISTENER THREAD
 # ================================
 def read_serial():
     global tomato_count
@@ -42,33 +31,48 @@ def read_serial():
                 tomato_count = int(line.split(":")[1])
                 print("Updated Count:", tomato_count)
 
+# ================================
+# COUNT ROUTES
+# ================================
+@app.route("/count")
+def get_count():
+    return {"count": tomato_count}
+
+@app.route("/reset")
+def reset():
+    global tomato_count
+    tomato_count = 0
+    ser.write(b'Z')  # Reset command to ESP32
+    print("System Reset to 0")
+    return {"status": "reset"}
 
 # ================================
-# CAMERA ROUTE
+# HOME
 # ================================
-@app.route('/camera')
-def camera_feed():
-    ret, frame = camera.read()
-    if not ret:
-        return "Camera Error", 500
-
-    _, buffer = cv2.imencode('.jpg', frame)
-    return Response(buffer.tobytes(), mimetype='image/jpeg')
-
 @app.route("/")
 def home():
     return "Agribot Server Running"
 
-
-
 # ================================
-# PICK ROUTE (ONLY ARM)
+# START HARVESTING (RUN scan_pick.py)
 # ================================
 @app.route('/pick')
 def pick():
-    # arm_pick()
-    return "Arm Activated"
 
+    global scan_process
+
+    if scan_process is None or scan_process.poll() is not None:
+
+        print("Starting scan_pick.py ...")
+
+        scan_process = subprocess.Popen(
+            ["python3", "scan_pick.py"]
+        )
+
+        return "Harvesting Started"
+
+    else:
+        return "Already Running"
 
 # ================================
 # START / STOP
@@ -79,17 +83,24 @@ def start():
     harvesting = True
     return "Harvest Started"
 
-
 @app.route('/stop')
 def stop():
-    global harvesting
+
+    global harvesting, scan_process
+
     harvesting = False
+
     ser.write(b'S')
+
+    if scan_process is not None:
+        scan_process.terminate()
+        scan_process = None
+        print("Harvesting Stopped")
+
     return "Harvest Stopped"
 
-
 # ================================
-# MANUAL MOVEMENT
+# ROBOT MOVEMENT
 # ================================
 @app.route('/forward')
 def forward():
@@ -111,15 +122,13 @@ def right():
     ser.write(b'R')
     return "Right"
 
-
 # ================================
 # MAIN
 # ================================
 if __name__ == "__main__":
 
-    # Start serial listener thread
     serial_thread = threading.Thread(target=read_serial)
     serial_thread.daemon = True
     serial_thread.start()
 
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=5000, threaded=True)
