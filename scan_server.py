@@ -73,6 +73,18 @@ def pick():
 
     else:
         return "Already Running"
+        
+@app.route('/stop_harvest')
+def stop_harvest():
+
+    global scan_process
+
+    if scan_process is not None:
+        scan_process.terminate()
+        scan_process = None
+        print("Harvesting Stopped")
+
+    return "Harvesting Stopped"
 
 # ================================
 # START / STOP
