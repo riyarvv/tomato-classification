@@ -2,6 +2,8 @@ from flask import Flask
 import serial
 import threading
 import subprocess
+import cv2
+from flask import Response
 
 app = Flask(__name__)
 
@@ -20,6 +22,20 @@ scan_process = None
 # ================================
 # SERIAL LISTENER THREAD
 # ================================
+camera = cv2.VideoCapture(0)
+
+def generate_frames():
+    while True:
+        success, frame = camera.read()
+        if not success:
+            break
+
+        ret, buffer = cv2.imencode('.jpg', frame)
+        frame = buffer.tobytes()
+
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+
 def read_serial():
     global tomato_count
 
@@ -45,6 +61,14 @@ def reset():
     ser.write(b'Z')  # Reset command to ESP32
     print("System Reset to 0")
     return {"status": "reset"}
+
+# ================================
+# CAMERA
+# ================================
+@app.route('/video_feed')
+def video_feed():
+    return Response(generate_frames(),
+                    mimetype='multipart/x-mixed-replace; boundary=frame')
 
 # ================================
 # HOME
