@@ -7,6 +7,10 @@ from adafruit_pca9685 import PCA9685
 from adafruit_motor import servo
 from tflite_runtime.interpreter import Interpreter
 
+from flask import Flask, Response
+import threading
+
+app = Flask(__name__)
 
 # ==========================================
 # 1️⃣ PCA9685 INITIALIZATION
@@ -35,7 +39,7 @@ LIMITS = {
     GRIPPER_CH:  {"close":15, "open":100}
 }
 
-CART_POSITION = 20  # Angle where cart is located
+CART_POSITION = 20
 
 # ==========================================
 # 4️⃣ SMOOTH MOVEMENT FUNCTION
@@ -59,7 +63,7 @@ def move_smooth(channel, target, step=1, delay=0.03):
         time.sleep(delay)
 
 # ==========================================
-# 5️⃣ GRIPPER STEP MOVEMENT (ARDUINO STYLE)
+# 5️⃣ GRIPPER STEP MOVEMENT
 # ==========================================
 def gripper_open_slow():
     steps = [15, 30, 45, 60, 75, 90, 100]
@@ -84,7 +88,7 @@ servos[GRIPPER_CH].angle = LIMITS[GRIPPER_CH]["open"]
 servos[CAMERA_CH].angle = servos[BASE_CH].angle
 
 # ==========================================
-# 7️⃣ LOAD YOLO TFLITE MODEL
+# 7️⃣ LOAD YOLO MODEL
 # ==========================================
 MODEL_PATH = "best_float16.tflite"
 CONF_THRESHOLD = 0.25
@@ -105,19 +109,52 @@ input_w = input_details[0]['shape'][2]
 # ==========================================
 cap = cv2.VideoCapture(0)
 
-# Set camera resolution (better FPS & no stretching)
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
+cap.set(cv2.CAP_PROP_FPS, 30)
 
-# Reduce lag
-cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-
-# Let OpenCV auto-size window to frame
-cv2.namedWindow("Harvest Vision", cv2.WINDOW_NORMAL)
-cv2.resizeWindow("Harvest Vision", 960, 720)
+# shared frame for streaming
+output_frame = None
+lock = threading.Lock()
 
 # ==========================================
-# 9️⃣ SCANNING VARIABLES
+# VIDEO STREAM GENERATOR
+# ==========================================
+def generate_frames():
+
+    global output_frame
+
+    while True:
+
+        with lock:
+            if output_frame is None:
+                time.sleep(0.01)
+                continue
+
+            ret, buffer = cv2.imencode('.jpg', output_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
+            frame = buffer.tobytes()
+
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' +
+               frame + b'\r\n')
+
+@app.route('/video_feed')
+def video_feed():
+    return Response(generate_frames(),
+        mimetype='multipart/x-mixed-replace; boundary=frame')
+
+# ==========================================
+# START FLASK SERVER
+# ==========================================
+def run_server():
+    app.run(host="0.0.0.0", port=5001, threaded=True)
+
+server_thread = threading.Thread(target=run_server)
+server_thread.daemon = True
+server_thread.start()
+
+# ==========================================
+# SCANNING VARIABLES
 # ==========================================
 scan_angle = 20
 scan_direction = 1
@@ -125,43 +162,38 @@ locked = False
 prev_time = 0
 
 # ==========================================
-# 🔄 PICK FUNCTION
+# PICK FUNCTION
 # ==========================================
 def pick_and_drop():
     global scan_angle
 
     print("🍅 Picking Ripe Tomato...")
 
-    # Move arm down slowly
     move_smooth(SHOULDER_CH, LIMITS[SHOULDER_CH]["pick"])
     move_smooth(ELBOW_CH, LIMITS[ELBOW_CH]["pick"])
 
-    # Close gripper slowly
     gripper_close_slow()
     time.sleep(1)
 
-    # Lift slowly
     move_smooth(ELBOW_CH, LIMITS[ELBOW_CH]["neutral"])
     move_smooth(SHOULDER_CH, LIMITS[SHOULDER_CH]["neutral"])
 
-    # Move to cart
     move_smooth(BASE_CH, CART_POSITION)
     servos[CAMERA_CH].angle = servos[BASE_CH].angle
     scan_angle = CART_POSITION
 
-    # Open slowly
     gripper_open_slow()
     time.sleep(1)
 
     print("✅ Pick Complete")
 
 # ==========================================
-# 🔄 MAIN LOOP
+# MAIN LOOP
 # ==========================================
 try:
+    frame_count = 0
     while True:
 
-        # ===== SCANNING =====
         if not locked:
 
             scan_angle += scan_direction * 1
@@ -173,10 +205,17 @@ try:
             servos[CAMERA_CH].angle = servos[BASE_CH].angle
             time.sleep(0.05)
 
-        # ===== CAMERA FRAME =====
         ret, frame = cap.read()
         if not ret:
             break
+    
+        frame_count += 1
+    
+        # Skip frames to speed up detection
+        if frame_count % 4 != 0:
+            with lock:
+                output_frame = frame.copy()
+            continue
 
         orig_h, orig_w = frame.shape[:2]
         center_x, center_y = orig_w//2, orig_h//2
@@ -191,7 +230,6 @@ try:
                       (zone_right,zone_bottom),
                       (255,255,255),1)
 
-        # ===== YOLO PREPROCESS =====
         img = cv2.resize(frame,(input_w,input_h))
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         img = img.astype(np.float32)/255.0
@@ -248,15 +286,7 @@ try:
                             0.6,(0,255,0),2)
 
                 if is_centered and not locked:
-                    cv2.putText(frame, "TARGET LOCKED",
-                    (center_x-80, center_y-70),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.8,
-                    (0,255,255), 2)
-    
-                    cv2.imshow("Harvest Vision", frame)
-                    cv2.waitKey(1)
-                
+
                     print(f"🎯 Target locked at angle {scan_angle}")
                     locked = True
                     pick_and_drop()
@@ -264,7 +294,6 @@ try:
                     locked = False
                     break
 
-        # ===== FPS =====
         curr_time = time.time()
         fps = 1/(curr_time-prev_time+1e-5)
         prev_time = curr_time
@@ -274,13 +303,9 @@ try:
                     cv2.FONT_HERSHEY_SIMPLEX,
                     1,(255,0,0),2)
 
-        cv2.imshow("Harvest Vision",frame)
-
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-            
+        with lock:
+            output_frame = frame.copy()
 
 finally:
     cap.release()
-    cv2.destroyAllWindows()
     pca.deinit()
