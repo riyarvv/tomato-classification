@@ -19,27 +19,6 @@ tomato_count = 0
 scan_process = None
 
 # ================================
-# CAMERA
-# ================================
-camera = cv2.VideoCapture(0)
-
-def generate_frames():
-    global camera
-
-    while True:
-        success, frame = camera.read()
-
-        if not success:
-            continue
-
-        ret, buffer = cv2.imencode('.jpg', frame)
-        frame = buffer.tobytes()
-
-        yield (b'--frame\r\n'
-               b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-
-
-# ================================
 # SERIAL LISTENER THREAD
 # ================================
 def read_serial():
@@ -78,11 +57,6 @@ def reset():
 # ================================
 # VIDEO STREAM
 # ================================
-@app.route('/video_feed')
-def video_feed():
-    return Response(generate_frames(),
-                    mimetype='multipart/x-mixed-replace; boundary=frame')
-
 
 # ================================
 # HOME
