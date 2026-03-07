@@ -153,6 +153,20 @@ def stop():
         scan_process = None
 
     return "Robot Stopped"
+# ================================
+# MOTOR SPEED CONTROL
+# ================================
+@app.route('/speed/<int:value>')
+def set_speed(value):
+
+    value = max(0, min(255, value))
+
+    command = f"SPEED:{value}\n"
+    ser.write(command.encode())
+
+    print("Speed Set To:", value)
+
+    return {"speed": value}
 
 
 # ================================
