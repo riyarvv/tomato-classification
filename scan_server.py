@@ -4,13 +4,23 @@ import threading
 import subprocess
 import cv2
 from flask import redirect
+import os
+import time
 
 app = Flask(__name__)
 
 # ================================
 # SERIAL CONNECTION (ESP32)
 # ================================
-ser = serial.Serial('/dev/serial/by-id/usb-1a86_USB_Single_Serial_5A58043556-if00', 115200, timeout=1)
+SERIAL_PORT = "/dev/serial/by-id/usb-1a86_USB_Single_Serial_5A58043556-if00"
+
+while not os.path.exists(SERIAL_PORT):
+    print("Waiting for ESP32 serial...")
+    time.sleep(1)
+
+ser = serial.Serial(SERIAL_PORT, 115200, timeout=1)
+
+print("ESP32 Connected")
 
 # ================================
 # GLOBAL VARIABLES
