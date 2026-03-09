@@ -153,6 +153,46 @@ def stop():
         scan_process = None
 
     return "Robot Stopped"
+
+# ================================
+# ROBOT MOVEMENT (STREAMLIT COMPATIBLE)
+# ================================
+@app.route('/move/<cmd>')
+def move(cmd):
+
+    global scan_process, harvesting
+
+    cmd = cmd.upper()
+
+    if cmd == "F":
+        ser.write(b'F')
+        return "Forward"
+
+    elif cmd == "B":
+        ser.write(b'B')
+        return "Back"
+
+    elif cmd == "L":
+        ser.write(b'L')
+        return "Left"
+
+    elif cmd == "R":
+        ser.write(b'R')
+        return "Right"
+
+    elif cmd == "S":
+
+        harvesting = False
+        ser.write(b'S')
+
+        if scan_process is not None:
+            scan_process.terminate()
+            scan_process = None
+
+        return "Stop"
+
+    return "Invalid Command"
+
 # ================================
 # MOTOR SPEED CONTROL
 # ================================
