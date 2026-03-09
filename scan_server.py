@@ -10,7 +10,7 @@ app = Flask(__name__)
 # ================================
 # SERIAL CONNECTION (ESP32)
 # ================================
-ser = serial.Serial('/dev/ttyACM0', 115200, timeout=1)
+ser = serial.Serial('/dev/esp32', 115200, timeout=1)
 
 # ================================
 # GLOBAL VARIABLES
