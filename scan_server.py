@@ -1,11 +1,8 @@
-from flask import Flask, Response
+from flask import Flask, Response, redirect, jsonify
 import serial
 import threading
 import subprocess
 import cv2
-from flask import redirect
-# import os
-# import time
 
 app = Flask(__name__)
 
@@ -36,64 +33,152 @@ def read_serial():
                 tomato_count = int(line.split(":")[1])
                 print("Updated Count:", tomato_count)
 
+# ================================
+# MAIN CONTROL PAGE
+# ================================
+@app.route("/control")
+def control():
+
+    return """
+<html>
+
+<head>
+<title>Agribot Controller</title>
+
+<style>
+
+body{
+font-family:Arial;
+text-align:center;
+background:#f4f4f4;
+}
+
+button{
+width:140px;
+height:70px;
+font-size:18px;
+margin:10px;
+border-radius:10px;
+border:none;
+background:#4CAF50;
+color:white;
+}
+
+button:hover{
+background:#45a049;
+}
+
+.video{
+border:5px solid black;
+margin-top:20px;
+}
+
+.countbox{
+font-size:28px;
+margin-top:20px;
+color:#333;
+}
+
+</style>
+</head>
+
+<body>
+
+<h1>🤖 Agribot Controller</h1>
+
+<h2>Live Camera</h2>
+
+<img src="/video_feed" width="480" class="video">
+
+<br><br>
+
+<h2>Robot Movement</h2>
+
+<button onclick="send('F')">⬆ Forward</button><br>
+
+<button onclick="send('L')">⬅ Left</button>
+<button onclick="send('S')">Stop</button>
+<button onclick="send('R')">➡ Right</button><br>
+
+<button onclick="send('B')">⬇ Back</button>
+
+<br><br>
+
+<h2>Motor Speed</h2>
+
+<input type="range" min="0" max="255" value="180"
+onchange="speed(this.value)">
+
+<br><br>
+
+<h2>Harvesting Control</h2>
+
+<button onclick="startHarvest()">Start Harvest</button>
+<button onclick="stopHarvest()">Stop Harvest</button>
+
+<div class="countbox">
+🍅 Tomato Count: <span id="count">0</span>
+</div>
+
+<br>
+
+<button onclick="resetCount()">Reset Count</button>
+
+<script>
+
+function send(cmd){
+fetch('/move/' + cmd)
+}
+
+function speed(val){
+fetch('/speed/' + val)
+}
+
+function startHarvest(){
+fetch('/pick')
+}
+
+function stopHarvest(){
+fetch('/stop_harvest')
+}
+
+function resetCount(){
+fetch('/reset')
+}
+
+function updateCount(){
+
+fetch('/count')
+.then(res => res.json())
+.then(data => {
+
+document.getElementById("count").innerText = data.count
+
+})
+
+}
+
+setInterval(updateCount,1000)
+
+</script>
+
+</body>
+</html>
+"""
+
+# ================================
+# VIDEO STREAM
+# ================================
+@app.route('/video_feed')
+def video_feed():
+    return redirect("http://raspberrypi.local:5001/video_feed")
 
 # ================================
 # COUNT ROUTES
 # ================================
-@app.route("/control")
-def control():
-    return """
-    <html>
-    <head>
-    <title>Agribot Controller</title>
-    <style>
-    button{
-        width:120px;
-        height:80px;
-        font-size:20px;
-        margin:10px;
-    }
-    </style>
-    </head>
-
-    <body style="text-align:center">
-
-    <h1>🤖 Agribot Controller</h1>
-
-    <button onclick="send('F')">⬆ Forward</button><br>
-
-    <button onclick="send('L')">⬅ Left</button>
-    <button onclick="send('S')">Stop</button>
-    <button onclick="send('R')">➡ Right</button><br>
-
-    <button onclick="send('B')">⬇ Back</button>
-
-    <br><br>
-
-    Speed:
-    <input type="range" min="0" max="255" value="180"
-    onchange="speed(this.value)">
-
-    <script>
-
-    function send(cmd){
-        fetch('/move/' + cmd)
-    }
-
-    function speed(val){
-        fetch('/speed/' + val)
-    }
-
-    </script>
-
-    </body>
-    </html>
-    """
-
 @app.route("/count")
 def get_count():
-    return {"count": tomato_count}
-
+    return jsonify({"count": tomato_count})
 
 @app.route("/reset")
 def reset():
@@ -105,22 +190,6 @@ def reset():
     print("System Reset to 0")
 
     return {"status": "reset"}
-
-
-# ================================
-# VIDEO STREAM
-# ================================
-@app.route('/video_feed')
-def video_feed():
-    return redirect("http://raspberrypi.local:5001/video_feed")
-
-# ================================
-# HOME
-# ================================
-@app.route("/")
-def home():
-    return "Agribot Server Running"
-
 
 # ================================
 # START HARVESTING
@@ -144,7 +213,6 @@ def pick():
 
     return "Already Running"
 
-
 # ================================
 # STOP HARVESTING
 # ================================
@@ -163,51 +231,8 @@ def stop_harvest():
 
     return "Harvesting Stopped"
 
-
 # ================================
 # ROBOT MOVEMENT
-# ================================
-@app.route('/forward')
-def forward():
-    ser.write(b'F')
-    return "Forward"
-
-
-@app.route('/back')
-def back():
-    ser.write(b'B')
-    return "Back"
-
-
-@app.route('/left')
-def left():
-    ser.write(b'L')
-    return "Left"
-
-
-@app.route('/right')
-def right():
-    ser.write(b'R')
-    return "Right"
-
-
-@app.route('/stop')
-def stop():
-
-    global scan_process, harvesting
-
-    harvesting = False
-
-    ser.write(b'S')
-
-    if scan_process is not None:
-        scan_process.terminate()
-        scan_process = None
-
-    return "Robot Stopped"
-
-# ================================
-# ROBOT MOVEMENT (STREAMLIT COMPATIBLE)
 # ================================
 @app.route('/move/<cmd>')
 def move(cmd):
@@ -260,6 +285,12 @@ def set_speed(value):
 
     return {"speed": value}
 
+# ================================
+# HOME
+# ================================
+@app.route("/")
+def home():
+    return "Agribot Server Running"
 
 # ================================
 # MAIN
