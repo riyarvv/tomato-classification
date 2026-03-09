@@ -40,6 +40,56 @@ def read_serial():
 # ================================
 # COUNT ROUTES
 # ================================
+@app.route("/control")
+def control():
+    return """
+    <html>
+    <head>
+    <title>Agribot Controller</title>
+    <style>
+    button{
+        width:120px;
+        height:80px;
+        font-size:20px;
+        margin:10px;
+    }
+    </style>
+    </head>
+
+    <body style="text-align:center">
+
+    <h1>🤖 Agribot Controller</h1>
+
+    <button onclick="send('F')">⬆ Forward</button><br>
+
+    <button onclick="send('L')">⬅ Left</button>
+    <button onclick="send('S')">Stop</button>
+    <button onclick="send('R')">➡ Right</button><br>
+
+    <button onclick="send('B')">⬇ Back</button>
+
+    <br><br>
+
+    Speed:
+    <input type="range" min="0" max="255" value="180"
+    onchange="speed(this.value)">
+
+    <script>
+
+    function send(cmd){
+        fetch('/move/' + cmd)
+    }
+
+    function speed(val){
+        fetch('/speed/' + val)
+    }
+
+    </script>
+
+    </body>
+    </html>
+    """
+
 @app.route("/count")
 def get_count():
     return {"count": tomato_count}
