@@ -203,9 +203,7 @@ def pick():
 
         print("Starting scan_pick.py ...")
 
-        scan_process = subprocess.Popen(
-            ["python3", "scan_pick.py"]
-        )
+        scan_process=subprocess.Popen(["/home/rslvpi5/tomato-detection/tomato-classification/venv/bin/python", "scan_pick.py"])
 
         harvesting = True
 
