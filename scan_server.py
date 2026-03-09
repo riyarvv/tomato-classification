@@ -202,9 +202,11 @@ def pick():
     if scan_process is None or scan_process.poll() is not None:
 
         print("Starting scan_pick.py ...")
-
-        scan_process=subprocess.Popen(["/home/rslvpi5/tomato-detection/tomato-classification/venv/bin/python", "scan_pick.py"])
-
+        scan_process = subprocess.Popen([
+"/home/rslvpi5/tomato-detection/tomato-classification/venv/bin/python",
+"/home/rslvpi5/tomato-detection/tomato-classification/scan_pick.py"
+])
+        
         harvesting = True
 
         return "Harvesting Started"
