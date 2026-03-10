@@ -90,7 +90,7 @@ servos[CAMERA_CH].angle = servos[BASE_CH].angle
 # ==========================================
 # 7️⃣ LOAD YOLO MODEL
 # ==========================================
-MODEL_PATH = "best_float16.tflite"
+MODEL_PATH = "/home/rslvpi5/tomato-detection/tomato-classification/best_float16.tflite"
 CONF_THRESHOLD = 0.25
 IOU_THRESHOLD = 0.45
 RIPE_CLASS_ID = 2
