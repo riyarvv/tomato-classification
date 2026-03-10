@@ -208,18 +208,29 @@ def pick():
         "/home/rslvpi5/tomato-detection/tomato-classification/venv/bin/python",
         "/home/rslvpi5/tomato-detection/tomato-classification/scan_pick.py"
         ],
+        cwd="/home/rslvpi5/tomato-detection/tomato-classification",
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        cwd="/home/rslvpi5/tomato-detection/tomato-classification"
+        text=True
         )
 
-        harvesting = True
         print("scan_pick.py started")
 
+        # check immediately if it crashed
+        import time
+        time.sleep(2)
+
+        if scan_process.poll() is not None:
+            out, err = scan_process.communicate()
+            print("Process crashed!")
+            print("STDOUT:", out)
+            print("STDERR:", err)
+            return "scan_pick.py crashed"
+
+        harvesting = True
         return "Harvesting Started"
 
     return "Already Running"
-
 # ================================
 # STOP HARVESTING
 # ================================
