@@ -79,6 +79,7 @@ def gripper_close_slow():
     for angle in steps:
         servos[GRIPPER_CH].angle = angle
         time.sleep(1.5)
+    ser.write(b'PICK\n')
 
 # ==========================================
 # 6️⃣ INITIAL POSITION
