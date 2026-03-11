@@ -112,11 +112,12 @@ input_w = input_details[0]['shape'][2]
 # ==========================================
 # 8️⃣ CAMERA
 # ==========================================
-cap = cv2.VideoCapture(0)
+cap = cv2.VideoCapture(0,cv2.CAP_V4L2)
 
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
 cap.set(cv2.CAP_PROP_FPS, 30)
+cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
 # shared frame for streaming
 output_frame = None
@@ -310,6 +311,8 @@ try:
 
         with lock:
             output_frame = frame.copy()
+
+        time.sleep(0.01)
 
 finally:
     cap.release()
