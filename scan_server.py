@@ -185,7 +185,11 @@ def increment_count():
     global tomato_count
 
     tomato_count += 1
-    print("🍅 Tomato Picked. Count:", tomato_count)
+
+    # send updated count to ESP32
+    ser.write(f"COUNT:{tomato_count}\n".encode())
+
+    print("🍅 Tomato Harvested:", tomato_count)
 
     return {"count": tomato_count}
 
