@@ -29,9 +29,12 @@ def read_serial():
         if ser.in_waiting:
             line = ser.readline().decode().strip()
 
-            if line.startswith("COUNT:"):
-                tomato_count = int(line.split(":")[1])
+            if line == "PICK":
+                tomato_count += 1
                 print("Updated Count:", tomato_count)
+            
+            elif line.startswith("COUNT:"):
+                tomato_count = int(line.split(":")[1])
 
 # ================================
 # MAIN CONTROL PAGE
