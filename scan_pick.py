@@ -60,7 +60,12 @@ def move_smooth(channel, target, step=1, delay=0.3):
 
     for angle in angles:
         servos[channel].angle = angle
-        time.sleep(delay)
+
+    # make camera follow base smoothly
+    if channel == BASE_CH:
+        servos[CAMERA_CH].angle = angle
+
+    time.sleep(delay)
 
 # ==========================================
 # 5️⃣ GRIPPER STEP MOVEMENT
