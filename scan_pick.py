@@ -179,6 +179,12 @@ def pick_and_drop():
     gripper_close_slow()
     time.sleep(1)
 
+    import requests
+    try:
+        requests.get("http://raspberrypi.local:5000/increment")
+    except:
+        pass
+
     move_smooth(ELBOW_CH, LIMITS[ELBOW_CH]["neutral"])
     move_smooth(SHOULDER_CH, LIMITS[SHOULDER_CH]["neutral"])
 
