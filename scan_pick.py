@@ -33,8 +33,8 @@ for ch in [BASE_CH, SHOULDER_CH, ELBOW_CH, PITCH_CH, GRIPPER_CH, CAMERA_CH]:
 # ==========================================
 LIMITS = {
     BASE_CH:     {"min":10, "max":100},
-    SHOULDER_CH: {"neutral":125, "pick":115},
-    ELBOW_CH:    {"neutral":30,  "pick":50},
+    SHOULDER_CH: {"neutral":160, "pick":150},
+    ELBOW_CH:    {"neutral":20,  "pick":40},
     PITCH_CH:    {"neutral":90},
     GRIPPER_CH:  {"close":15, "open":100}
 }
@@ -44,7 +44,7 @@ CART_POSITION = 20
 # ==========================================
 # 4️⃣ SMOOTH MOVEMENT FUNCTION
 # ==========================================
-def move_smooth(channel, target, step=1, delay=0.03):
+def move_smooth(channel, target, step=1, delay=0.3):
 
     current = servos[channel].angle
     if current is None:
