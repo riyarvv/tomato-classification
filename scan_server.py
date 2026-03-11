@@ -171,22 +171,7 @@ setInterval(updateCount,1000)
 # ================================
 @app.route('/video_feed')
 def video_feed():
-
-    def generate():
-
-        stream = requests.get(
-            "http://127.0.0.1:5001/video_feed",
-            stream=True
-        )
-
-        for chunk in stream.iter_content(chunk_size=1024):
-            if chunk:
-                yield chunk
-
-    return Response(
-        generate(),
-        mimetype='multipart/x-mixed-replace; boundary=frame'
-    )
+    return redirect("http://raspberrypi.local:5001/video_feed")
 
 # ================================
 # COUNT ROUTES
