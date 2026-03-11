@@ -62,8 +62,8 @@ def move_smooth(channel, target, step=1, delay=0.3):
         servos[channel].angle = angle
 
         # make camera follow base smoothly
-        if channel == BASE_CH:
-            servos[CAMERA_CH].angle = angle
+        # if channel == BASE_CH:
+        #     servos[CAMERA_CH].angle = angle
 
     time.sleep(delay)
 
