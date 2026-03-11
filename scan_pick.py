@@ -1,367 +1,318 @@
-from flask import Flask, Response, redirect, jsonify
-import serial
-import threading
-import subprocess
+import time
+import board
+import busio
 import cv2
+import numpy as np
+from adafruit_pca9685 import PCA9685
+from adafruit_motor import servo
+from tflite_runtime.interpreter import Interpreter
+
+from flask import Flask, Response
+import threading
 
 app = Flask(__name__)
 
-# ================================
-# SERIAL CONNECTION (ESP32)
-# ================================
-ser = serial.Serial('/dev/ttyACM0', 115200, timeout=1)
+# ==========================================
+# 1️⃣ PCA9685 INITIALIZATION
+# ==========================================
+i2c = busio.I2C(board.SCL, board.SDA)
+pca = PCA9685(i2c)
+pca.frequency = 50
 
-# ================================
-# GLOBAL VARIABLES
-# ================================
-harvesting = False
-tomato_count = 0
-scan_process = None
+# ==========================================
+# 2️⃣ CHANNEL MAPPING
+# ==========================================
+BASE_CH, SHOULDER_CH, ELBOW_CH, PITCH_CH, GRIPPER_CH, CAMERA_CH = 0,1,2,3,5,6
 
-# ================================
-# CAMERA SETUP
-# ================================
-cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
+servos = {}
+for ch in [BASE_CH, SHOULDER_CH, ELBOW_CH, PITCH_CH, GRIPPER_CH, CAMERA_CH]:
+    servos[ch] = servo.Servo(pca.channels[ch], min_pulse=500, max_pulse=2500)
+
+# ==========================================
+# 3️⃣ SERVO LIMITS
+# ==========================================
+LIMITS = {
+    BASE_CH:     {"min":10, "max":100},
+    SHOULDER_CH: {"neutral":160, "pick":150},
+    ELBOW_CH:    {"neutral":20,  "pick":40},
+    PITCH_CH:    {"neutral":90},
+    GRIPPER_CH:  {"close":15, "open":100}
+}
+
+CART_POSITION = 20
+
+# ==========================================
+# 4️⃣ SMOOTH MOVEMENT FUNCTION
+# ==========================================
+def move_smooth(channel, target, step=1, delay=0.3):
+
+    current = servos[channel].angle
+    if current is None:
+        current = target
+
+    current = int(current)
+    target = int(target)
+
+    if current < target:
+        angles = range(current, target + 1, step)
+    else:
+        angles = range(current, target - 1, -step)
+
+    for angle in angles:
+        servos[channel].angle = angle
+
+        # make camera follow base smoothly
+        # if channel == BASE_CH:
+        #     servos[CAMERA_CH].angle = angle
+
+    time.sleep(delay)
+
+# ==========================================
+# 5️⃣ GRIPPER STEP MOVEMENT
+# ==========================================
+def gripper_open_slow():
+    steps = [15, 30, 45, 60, 75, 90, 100]
+    for angle in steps:
+        servos[GRIPPER_CH].angle = angle
+        time.sleep(1.5)
+
+def gripper_close_slow():
+    steps = [100, 90, 75, 60, 45, 30, 15]
+    for angle in steps:
+        servos[GRIPPER_CH].angle = angle
+        time.sleep(1.5)
+
+# ==========================================
+# 6️⃣ INITIAL POSITION
+# ==========================================
+move_smooth(BASE_CH, 20)
+move_smooth(SHOULDER_CH, LIMITS[SHOULDER_CH]["neutral"])
+move_smooth(ELBOW_CH, LIMITS[ELBOW_CH]["neutral"])
+move_smooth(PITCH_CH, LIMITS[PITCH_CH]["neutral"])
+servos[GRIPPER_CH].angle = LIMITS[GRIPPER_CH]["open"]
+servos[CAMERA_CH].angle = servos[BASE_CH].angle
+
+# ==========================================
+# 7️⃣ LOAD YOLO MODEL
+# ==========================================
+MODEL_PATH = "/home/rslvpi5/tomato-detection/tomato-classification/best_float16.tflite"
+CONF_THRESHOLD = 0.25
+IOU_THRESHOLD = 0.45
+RIPE_CLASS_ID = 2
+
+interpreter = Interpreter(model_path=MODEL_PATH, num_threads=4)
+interpreter.allocate_tensors()
+
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
+
+input_h = input_details[0]['shape'][1]
+input_w = input_details[0]['shape'][2]
+
+# ==========================================
+# 8️⃣ CAMERA
+# ==========================================
+cap = cv2.VideoCapture(0,cv2.CAP_V4L2)
+
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
+cap.set(cv2.CAP_PROP_FPS, 30)
 cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
+# shared frame for streaming
 output_frame = None
-latest_frame = None
 lock = threading.Lock()
 
-# ================================
-# CAMERA READER THREAD
-# ================================
-def camera_reader():
-    global latest_frame
-
-    while True:
-        ret, frame = cap.read()
-        if ret:
-            latest_frame = frame
-
-cam_thread = threading.Thread(target=camera_reader)
-cam_thread.daemon = True
-cam_thread.start()
-
-# ================================
-# VIDEO STREAM
-# ================================
+# ==========================================
+# VIDEO STREAM GENERATOR
+# ==========================================
 def generate_frames():
+
     global output_frame
 
     while True:
 
         with lock:
-            if latest_frame is None:
+            if output_frame is None:
+                time.sleep(0.01)
                 continue
 
-            frame = latest_frame.copy()
-
-        ret, buffer = cv2.imencode(
-            '.jpg',
-            frame,
-            [int(cv2.IMWRITE_JPEG_QUALITY), 40]
-        )
-
-        frame = buffer.tobytes()
+            ret, buffer = cv2.imencode('.jpg', output_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
+            frame = buffer.tobytes()
 
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' +
-               frame +
-               b'\r\n')
+               frame + b'\r\n')
 
-# ================================
-# SERIAL LISTENER THREAD
-# ================================
-def read_serial():
-    global tomato_count
-
-    while True:
-
-        if ser.in_waiting:
-            line = ser.readline().decode().strip()
-
-            if line.startswith("COUNT:"):
-                tomato_count = int(line.split(":")[1])
-                print("Updated Count:", tomato_count)
-
-# ================================
-# MAIN CONTROL PAGE
-# ================================
-@app.route("/control")
-def control():
-
-    return """
-<html>
-
-<head>
-<title>Agribot Controller</title>
-
-<style>
-
-body{
-font-family:Arial;
-text-align:center;
-background:#f4f4f4;
-}
-
-button{
-width:140px;
-height:70px;
-font-size:18px;
-margin:10px;
-border-radius:10px;
-border:none;
-background:#4CAF50;
-color:white;
-}
-
-button:hover{
-background:#45a049;
-}
-
-.video{
-border:5px solid black;
-margin-top:20px;
-}
-
-.countbox{
-font-size:28px;
-margin-top:20px;
-color:#333;
-}
-
-</style>
-</head>
-
-<body>
-
-<h1>🤖 Agribot Controller</h1>
-
-<h2>Live Camera</h2>
-
-<img src="/video_feed" width="480" class="video">
-
-<br><br>
-
-<h2>Robot Movement</h2>
-
-<button onclick="send('F')">⬆ Forward</button><br>
-
-<button onclick="send('L')">⬅ Left</button>
-<button onclick="send('S')">Stop</button>
-<button onclick="send('R')">➡ Right</button><br>
-
-<button onclick="send('B')">⬇ Back</button>
-
-<br><br>
-
-<h2>Motor Speed</h2>
-
-<input type="range" min="0" max="255" value="180"
-onchange="speed(this.value)">
-
-<br><br>
-
-<h2>Harvesting Control</h2>
-
-<button onclick="startHarvest()">Start Harvest</button>
-<button onclick="stopHarvest()">Stop Harvest</button>
-
-<div class="countbox">
-🍅 Tomato Count: <span id="count">0</span>
-</div>
-
-<br>
-
-<button onclick="resetCount()">Reset Count</button>
-
-<script>
-
-function send(cmd){
-fetch('/move/' + cmd)
-}
-
-function speed(val){
-fetch('/speed/' + val)
-}
-
-function startHarvest(){
-fetch('/pick')
-}
-
-function stopHarvest(){
-fetch('/stop_harvest')
-}
-
-function resetCount(){
-fetch('/reset')
-}
-
-function updateCount(){
-
-fetch('/count')
-.then(res => res.json())
-.then(data => {
-
-document.getElementById("count").innerText = data.count
-
-})
-
-}
-
-setInterval(updateCount,1000)
-
-</script>
-
-</body>
-</html>
-"""
-
-# ================================
-# VIDEO STREAM ROUTE
-# ================================
 @app.route('/video_feed')
 def video_feed():
     return Response(generate_frames(),
-                    mimetype='multipart/x-mixed-replace; boundary=frame')
+        mimetype='multipart/x-mixed-replace; boundary=frame')
 
-# ================================
-# COUNT ROUTES
-# ================================
-@app.route("/count")
-def get_count():
-    return jsonify({"count": tomato_count})
+# ==========================================
+# START FLASK SERVER
+# ==========================================
+def run_server():
+    app.run(host="0.0.0.0", port=5001, threaded=True)
 
-@app.route("/reset")
-def reset():
-    global tomato_count
+server_thread = threading.Thread(target=run_server)
+server_thread.daemon = True
+server_thread.start()
 
-    tomato_count = 0
-    ser.write(b'Z')
+# ==========================================
+# SCANNING VARIABLES
+# ==========================================
+scan_angle = 20
+scan_direction = 1
+locked = False
+prev_time = 0
 
-    print("System Reset to 0")
+# ==========================================
+# PICK FUNCTION
+# ==========================================
+def pick_and_drop():
+    global scan_angle
 
-    return {"status": "reset"}
+    print("🍅 Picking Ripe Tomato...")
 
-# ================================
-# START HARVESTING
-# ================================
-@app.route('/pick')
-def pick():
+    move_smooth(SHOULDER_CH, LIMITS[SHOULDER_CH]["pick"])
+    move_smooth(ELBOW_CH, LIMITS[ELBOW_CH]["pick"])
 
-    global scan_process, harvesting
+    gripper_close_slow()
+    time.sleep(1)
 
-    print("Pick button pressed")
+    move_smooth(ELBOW_CH, LIMITS[ELBOW_CH]["neutral"])
+    move_smooth(SHOULDER_CH, LIMITS[SHOULDER_CH]["neutral"])
 
-    if scan_process and scan_process.poll() is not None:
-        scan_process = None
+    move_smooth(BASE_CH, CART_POSITION)
+    servos[CAMERA_CH].angle = servos[BASE_CH].angle
+    scan_angle = CART_POSITION
 
-    if scan_process is None:
+    gripper_open_slow()
+    time.sleep(1)
 
-        scan_process = subprocess.Popen(
-        [
-        "/home/rslvpi5/tomato-detection/tomato-classification/venv/bin/python",
-        "scan_pick.py"
-        ],
-        cwd="/home/rslvpi5/tomato-detection/tomato-classification"
-        )
+    print("✅ Pick Complete")
 
-        harvesting = True
-        print("scan_pick.py started")
+# ==========================================
+# MAIN LOOP
+# ==========================================
+try:
+    frame_count = 0
+    while True:
 
-        return "Harvesting Started"
+        if not locked:
 
-    return "Already Running"
+            scan_angle += scan_direction * 1
 
-# ================================
-# STOP HARVESTING
-# ================================
-@app.route('/stop_harvest')
-def stop_harvest():
+            if scan_angle >= LIMITS[BASE_CH]["max"] or scan_angle <= LIMITS[BASE_CH]["min"]:
+                scan_direction *= -1
 
-    global scan_process, harvesting
+            move_smooth(BASE_CH, scan_angle, step=1, delay=0.02)
+            servos[CAMERA_CH].angle = servos[BASE_CH].angle
+            time.sleep(0.05)
 
-    harvesting = False
+        ret, frame = cap.read()
+        if not ret:
+            break
+    
+        frame_count += 1
+    
+        # Skip frames to speed up detection
+        if frame_count % 4 != 0:
+            with lock:
+                output_frame = frame.copy()
+            continue
 
-    if scan_process is not None:
-        scan_process.terminate()
-        scan_process = None
+        orig_h, orig_w = frame.shape[:2]
+        center_x, center_y = orig_w//2, orig_h//2
 
-        print("Harvesting Stopped")
+        zone_size = 120
+        zone_left = center_x - zone_size//2
+        zone_right = center_x + zone_size//2
+        zone_top = center_y - zone_size//2
+        zone_bottom = center_y + zone_size//2
 
-    return "Harvesting Stopped"
+        cv2.rectangle(frame,(zone_left,zone_top),
+                      (zone_right,zone_bottom),
+                      (255,255,255),1)
 
-# ================================
-# ROBOT MOVEMENT
-# ================================
-@app.route('/move/<cmd>')
-def move(cmd):
+        img = cv2.resize(frame,(input_w,input_h))
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img = img.astype(np.float32)/255.0
+        img = np.expand_dims(img,axis=0)
 
-    global scan_process, harvesting
+        interpreter.set_tensor(input_details[0]['index'], img)
+        interpreter.invoke()
 
-    cmd = cmd.upper()
+        output = interpreter.get_tensor(output_details[0]['index'])[0]
+        output = output.T
 
-    if cmd == "F":
-        ser.write(b'F')
-        return "Forward"
+        boxes = []
+        scores = []
+        centers = []
 
-    elif cmd == "B":
-        ser.write(b'B')
-        return "Back"
+        for pred in output:
+            x,y,w,h = pred[:4]
+            class_scores = pred[4:]
 
-    elif cmd == "L":
-        ser.write(b'L')
-        return "Left"
+            class_id = int(np.argmax(class_scores))
+            confidence = class_scores[class_id]
 
-    elif cmd == "R":
-        ser.write(b'R')
-        return "Right"
+            if confidence > CONF_THRESHOLD and class_id == RIPE_CLASS_ID:
 
-    elif cmd == "S":
+                xmin = int((x - w/2) * orig_w)
+                ymin = int((y - h/2) * orig_h)
+                xmax = int((x + w/2) * orig_w)
+                ymax = int((y + h/2) * orig_h)
 
-        harvesting = False
-        ser.write(b'S')
+                boxes.append([xmin,ymin,xmax-xmin,ymax-ymin])
+                scores.append(float(confidence))
+                centers.append((int(x*orig_w), int(y*orig_h)))
 
-        if scan_process is not None:
-            scan_process.terminate()
-            scan_process = None
+        indices = cv2.dnn.NMSBoxes(boxes, scores,
+                                   CONF_THRESHOLD, IOU_THRESHOLD)
 
-        return "Stop"
+        if len(indices) > 0:
+            for idx in indices.flatten():
 
-    return "Invalid Command"
+                x,y,bw,bh = boxes[idx]
+                score = scores[idx]
+                cx,cy = centers[idx]
 
-# ================================
-# MOTOR SPEED CONTROL
-# ================================
-@app.route('/speed/<int:value>')
-def set_speed(value):
+                is_centered = (
+                    zone_left < cx < zone_right and
+                    zone_top < cy < zone_bottom
+                )
 
-    value = max(0, min(255, value))
+                cv2.rectangle(frame,(x,y),(x+bw,y+bh),(0,255,0),2)
+                cv2.circle(frame,(cx,cy),5,(0,255,0),-1)
+                cv2.putText(frame,f"Ripe {score:.2f}",
+                            (x,y-10),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.6,(0,255,0),2)
 
-    command = f"SPEED:{value}\n"
-    ser.write(command.encode())
+                if is_centered and not locked:
 
-    print("Speed Set To:", value)
+                    print(f"🎯 Target locked at angle {scan_angle}")
+                    locked = True
+                    pick_and_drop()
+                    time.sleep(2)
+                    locked = False
+                    break
 
-    return {"speed": value}
+        curr_time = time.time()
+        fps = 1/(curr_time-prev_time+1e-5)
+        prev_time = curr_time
 
-# ================================
-# HOME
-# ================================
-@app.route("/")
-def home():
-    return "Agribot Server Running"
+        cv2.putText(frame,f"FPS: {int(fps)}",
+                    (20,40),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    1,(255,0,0),2)
 
-# ================================
-# MAIN
-# ================================
-if __name__ == "__main__":
+        with lock:
+            output_frame = frame.copy()
 
-    serial_thread = threading.Thread(target=read_serial)
-    serial_thread.daemon = True
-    serial_thread.start()
 
-    print("Agribot Server Running...")
-
-    app.run(host="0.0.0.0", port=5000, threaded=True)
+finally:
+    cap.release()
+    pca.deinit()
