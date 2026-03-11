@@ -6,6 +6,7 @@ import numpy as np
 from adafruit_pca9685 import PCA9685
 from adafruit_motor import servo
 from tflite_runtime.interpreter import Interpreter
+import serial
 
 from flask import Flask, Response
 import threading
@@ -18,6 +19,7 @@ app = Flask(__name__)
 i2c = busio.I2C(board.SCL, board.SDA)
 pca = PCA9685(i2c)
 pca.frequency = 50
+ser = serial.Serial('/dev/ttyACM0',115200,timeout=1)
 
 # ==========================================
 # 2️⃣ CHANNEL MAPPING
