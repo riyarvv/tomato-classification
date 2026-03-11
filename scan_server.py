@@ -29,12 +29,9 @@ def read_serial():
         if ser.in_waiting:
             line = ser.readline().decode().strip()
 
-            if line == "PICK":
-                tomato_count += 1
-                print("Updated Count:", tomato_count)
-            
-            elif line.startswith("COUNT:"):
+            if line.startswith("COUNT:"):
                 tomato_count = int(line.split(":")[1])
+                print("Updated Count:", tomato_count)
 
 # ================================
 # MAIN CONTROL PAGE
@@ -182,6 +179,15 @@ def video_feed():
 @app.route("/count")
 def get_count():
     return jsonify({"count": tomato_count})
+
+@app.route("/increment")
+def increment_count():
+    global tomato_count
+
+    tomato_count += 1
+    print("🍅 Tomato Picked. Count:", tomato_count)
+
+    return {"count": tomato_count}
 
 @app.route("/reset")
 def reset():
