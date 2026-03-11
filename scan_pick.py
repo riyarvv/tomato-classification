@@ -312,7 +312,6 @@ try:
         with lock:
             output_frame = frame.copy()
 
-        time.sleep(0.01)
 
 finally:
     cap.release()
