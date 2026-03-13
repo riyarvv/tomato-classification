@@ -22,7 +22,7 @@ pca.frequency = 50
 # ==========================================
 # 2️⃣ CHANNEL MAPPING
 # ==========================================
-BASE_CH, SHOULDER_CH, ELBOW_CH, PITCH_CH, GRIPPER_CH, CAMERA_CH = 0,1,2,3,5,6
+BASE_CH, SHOULDER_CH, ELBOW_CH, PITCH_CH, GRIPPER_CH, CAMERA_CH = 0,1,2,6,5,3
 
 servos = {}
 for ch in [BASE_CH, SHOULDER_CH, ELBOW_CH, PITCH_CH, GRIPPER_CH, CAMERA_CH]:
