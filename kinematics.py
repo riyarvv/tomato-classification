@@ -116,8 +116,8 @@ class InverseKinematics:
     def __init__(self):
         # ========== MEASURE YOUR ARM LENGTHS ==========
         # Adjust these values to match your actual robot arm (in cm)
-        self.L1 = 14.5.0  # Shoulder to elbow
-        self.L2 = 13.5.0  # Elbow to wrist
+        self.L1 = 14.50  # Shoulder to elbow
+        self.L2 = 13.50  # Elbow to wrist
         self.L3 = 9.0   # Wrist to gripper tip
         
         # Base offset from ground (cm)
@@ -126,14 +126,14 @@ class InverseKinematics:
         # Servo angle limits
         self.base_min = 10
         self.base_max = 100
-        self.shoulder_min = 0
-        self.shoulder_max = 180
-        self.elbow_min = 0
-        self.elbow_max = 180
+        self.shoulder_min = 160
+        self.shoulder_max = 120
+        self.elbow_min = 20
+        self.elbow_max = 65
         
         # Camera parameters
-        self.FOV_HORIZONTAL = 62  # degrees
-        self.FOV_VERTICAL = 48    # degrees
+        self.FOV_HORIZONTAL = 48.8  # degrees
+        self.FOV_VERTICAL = 36.6    # degrees
         
     def pixel_to_cm(self, pixel_x, pixel_y, distance_z, frame_width, frame_height):
         """
@@ -240,7 +240,7 @@ pca.frequency = 50
 # ==========================================
 # CHANNEL MAPPING
 # ==========================================
-BASE_CH, SHOULDER_CH, ELBOW_CH, PITCH_CH, GRIPPER_CH, CAMERA_CH = 0, 1, 2, 6, 5, 3
+BASE_CH, SHOULDER_CH, ELBOW_CH, PITCH_CH, GRIPPER_CH, CAMERA_CH = 0, 1, 2, 3, 5, 6
 
 servos = {}
 for ch in [BASE_CH, SHOULDER_CH, ELBOW_CH, PITCH_CH, GRIPPER_CH, CAMERA_CH]:
@@ -253,7 +253,7 @@ LIMITS = {
     BASE_CH:     {"min": 10, "max": 100},
     SHOULDER_CH: {"neutral": 160, "pick": 140},
     ELBOW_CH:    {"neutral": 20,  "pick": 30},
-    PITCH_CH:    {"neutral": 90},
+    PITCH_CH:    {"neutral": 80},
     GRIPPER_CH:  {"close": 15, "open": 100}
 }
 
