@@ -19,9 +19,61 @@ from adafruit_motor import servo
 from tflite_runtime.interpreter import Interpreter
 from flask import Flask, Response, jsonify
 import requests
+import json
+import serial
+import sys
 
 # Set the pin factory for gpiozero (for Raspberry Pi 5)
 Device.pin_factory = LGPIOFactory()
+
+# ==========================================
+# SERIAL COMMUNICATION WITH ESP32
+# ==========================================
+try:
+    ser = serial.Serial('/dev/ttyACM0', 115200, timeout=1)
+    print("✅ Serial connection established with ESP32")
+except:
+    print("⚠️ Could not connect to serial. Make sure ESP32 is connected.")
+    ser = None
+
+# ==========================================
+# TOMATO COUNT (from gripper closures)
+# ==========================================
+tomato_count = 0
+
+def increment_count():
+    """Increment tomato count when gripper closes"""
+    global tomato_count
+    tomato_count += 1
+    
+    # Send to ESP32 for OLED display
+    if ser:
+        ser.write(f"COUNT:{tomato_count}\n".encode())
+    
+    # Also print for server to capture
+    print(f"🍅 Tomato Harvested! Total: {tomato_count}")
+    print(json.dumps({
+        'state': 'harvested',
+        'count': tomato_count,
+        'timestamp': time.time()
+    }))
+    
+    return tomato_count
+
+def reset_count():
+    """Reset tomato count to zero"""
+    global tomato_count
+    tomato_count = 0
+    
+    if ser:
+        ser.write("COUNT:0\n".encode())
+    
+    print("🔄 Counter reset to 0")
+    print(json.dumps({
+        'state': 'reset',
+        'count': 0,
+        'timestamp': time.time()
+    }))
 
 # ==========================================
 # FLASK APP INITIALIZATION
@@ -286,6 +338,9 @@ def gripper_close_slow():
     for angle in steps:
         servos[GRIPPER_CH].angle = angle
         time.sleep(0.3)
+    
+    # INCREMENT COUNT WHEN GRIPPER CLOSES
+    increment_count()
 
 def gripper_open_fast():
     """Open gripper quickly"""
@@ -294,6 +349,9 @@ def gripper_open_fast():
 def gripper_close_fast():
     """Close gripper quickly"""
     servos[GRIPPER_CH].angle = LIMITS[GRIPPER_CH]["close"]
+    
+    # INCREMENT COUNT WHEN GRIPPER CLOSES
+    increment_count()
 
 # ==========================================
 # HOME POSITION FUNCTION
@@ -408,14 +466,14 @@ def api_status():
     return jsonify({
         'state': 'scanning' if not locked else 'picking',
         'tomatoes_found': len([t for t in [target_tomato] if t['pixel_x']]),
-        'battery': 100,  # Add battery monitoring if available
+        'count': tomato_count,
         'distance': ultrasonic.get_distance()
     })
 
 @app.route('/api/command/<cmd>', methods=['POST'])
 def api_command(cmd):
     """API endpoint for commands"""
-    global locked, scan_angle, scan_direction
+    global locked, scan_angle, scan_direction, tomato_count
     
     if cmd == 'home':
         return_home()
@@ -430,6 +488,9 @@ def api_command(cmd):
     elif cmd == 'emergency':
         emergency_stop()
         return jsonify({'message': 'EMERGENCY STOP'})
+    elif cmd == 'reset_count':
+        reset_count()
+        return jsonify({'message': 'Count reset', 'count': 0})
     else:
         return jsonify({'message': 'Unknown command'})
 
@@ -580,11 +641,8 @@ def pick_with_ik():
     
     # PHASE 3: GRASP
     print("📍 Phase 3/7: Grasping tomato...")
-    gripper_close_slow()
+    gripper_close_slow()  # This will increment the count automatically
     time.sleep(1)
-    
-    # Check if we have something
-    # You could add a pressure sensor or current monitoring here
     
     # PHASE 4: DETACH (gentle twist)
     print("📍 Phase 4/7: Detaching from plant...")
@@ -637,6 +695,11 @@ def emergency_stop():
     global locked
     print("🚨 EMERGENCY STOP ACTIVATED!")
     locked = True
+    
+    # Send emergency signal to ESP32
+    if ser:
+        ser.write(b'E')
+    
     # Don't move servos, just stop
 
 # ==========================================
@@ -684,7 +747,8 @@ def calibrate_system():
 # ==========================================
 try:
     print("\n🚀 Smart Harvester Robot Started!")
-    print("📡 Web interface available at: http://raspberrypi.local:5001")
+    print("📡 Video stream available at: http://raspberrypi.local:5001")
+    print("📡 Status API at: http://raspberrypi.local:5001/api/status")
     print("🔍 Scanning for tomatoes...\n")
     
     while True:
@@ -709,6 +773,9 @@ try:
         # Skip frames to speed up detection
         if frame_count % 4 != 0:
             with lock:
+                # Add count to frame
+                cv2.putText(frame, f"Count: {tomato_count}", (20, 160),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
                 output_frame = frame.copy()
             continue
 
@@ -818,6 +885,10 @@ try:
         dist = ultrasonic.get_distance()
         cv2.putText(frame, f"Distance: {dist:.1f}cm", (20, 120),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
+        
+        # Show tomato count
+        cv2.putText(frame, f"Harvested: {tomato_count}", (20, 160),
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
         # UPDATE OUTPUT FRAME
         with lock:
@@ -838,4 +909,6 @@ finally:
     cap.release()
     pca.deinit()
     ultrasonic.cleanup()
+    if ser:
+        ser.close()
     print("✅ Cleanup complete. Goodbye!")
