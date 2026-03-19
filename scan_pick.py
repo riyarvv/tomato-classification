@@ -175,7 +175,6 @@ def pick_and_drop():
     print("🍅 Picking Ripe Tomato...")
 
     move_smooth(SHOULDER_CH, LIMITS[SHOULDER_CH]["pick"])
-    move_smooth(ELBOW_CH, LIMITS[ELBOW_CH]["pick"])
 
     gripper_close_slow()
     time.sleep(1)
@@ -185,6 +184,10 @@ def pick_and_drop():
         requests.get("http://raspberrypi.local:5000/increment")
     except:
         pass
+
+    move_smooth(ELBOW_CH, LIMITS[ELBOW_CH]["pick"])
+
+    time.sleep(1)
 
     move_smooth(ELBOW_CH, LIMITS[ELBOW_CH]["neutral"])
     move_smooth(SHOULDER_CH, LIMITS[SHOULDER_CH]["neutral"])
