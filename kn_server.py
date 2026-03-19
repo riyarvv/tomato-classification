@@ -444,7 +444,7 @@ def pick():
         scan_process = subprocess.Popen(
             [
                 "/home/rslvpi5/tomato-detection/tomato-classification/venv/bin/python",
-                "scan_pick.py"
+                "kinematics.py"
             ],
             cwd="/home/rslvpi5/tomato-detection/tomato-classification",
             stdout=subprocess.PIPE,
