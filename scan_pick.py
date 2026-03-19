@@ -10,10 +10,6 @@ from tflite_runtime.interpreter import Interpreter
 from flask import Flask, Response
 import threading
 
-# ✅ Ultrasonic (Z-axis)
-from gpiozero import DistanceSensor
-sensor = DistanceSensor(echo=24, trigger=23)
-
 app = Flask(__name__)
 
 # ==========================================
@@ -83,13 +79,6 @@ def gripper_close_slow():
     for angle in steps:
         servos[GRIPPER_CH].angle = angle
         time.sleep(1.5)
-
-def get_stable_distance():
-    readings = []
-    for _ in range(5):
-        readings.append(sensor.distance * 100)  # convert to cm
-        time.sleep(0.05)
-    return sum(readings)/len(readings)
 
 # ==========================================
 # 6️⃣ INITIAL POSITION
@@ -187,42 +176,6 @@ def pick_and_drop():
 
     move_smooth(SHOULDER_CH, LIMITS[SHOULDER_CH]["pick"])
 
-    # 🔥 NEW: move forward using ultrasonic (Z-axis)
-    step_count = 0
-    while True:
-
-        dist = get_stable_distance()
-        print(f"Distance: {dist:.2f} cm")
-
-        # ignore bad readings
-        if dist <= 0 or dist > 100:
-            print("⚠️ Invalid reading")
-            continue
-
-        # stop when close
-        if dist < 8:
-            print("📍 Close enough to pick")
-            break
-
-        current = servos[ELBOW_CH].angle
-
-        # safety limit
-        if current >= 50:
-            print("⚠️ Max reach reached")
-            break
-
-        # prevent infinite loop
-        step_count += 1
-        if step_count > 50:
-            print("⚠️ Safety break")
-            break
-
-        # small forward movement
-        move_smooth(ELBOW_CH, current + 1, step=1, delay=0.05)
-
-    time.sleep(1)
-
-    # ✅ KEEP EVERYTHING BELOW EXACTLY SAME
     gripper_close_slow()
     time.sleep(1)
 
@@ -232,6 +185,7 @@ def pick_and_drop():
     except:
         pass
 
+    # Quick small jerk for detaching
     move_smooth(ELBOW_CH, 25, step=2, delay=0.01)
 
     time.sleep(1)
