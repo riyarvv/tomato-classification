@@ -116,12 +116,12 @@ class InverseKinematics:
     def __init__(self):
         # ========== MEASURE YOUR ARM LENGTHS ==========
         # Adjust these values to match your actual robot arm (in cm)
-        self.L1 = 15.0  # Shoulder to elbow
-        self.L2 = 13.0  # Elbow to wrist
-        self.L3 = 8.0   # Wrist to gripper tip
+        self.L1 = 14.5.0  # Shoulder to elbow
+        self.L2 = 13.5.0  # Elbow to wrist
+        self.L3 = 9.0   # Wrist to gripper tip
         
         # Base offset from ground (cm)
-        self.base_height = 10.0
+        self.base_height = 6.50
         
         # Servo angle limits
         self.base_min = 10
