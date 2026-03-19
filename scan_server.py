@@ -630,4 +630,4 @@ if __name__ == "__main__":
     print("📡 Video stream: http://raspberrypi.local:5001/video_feed")
     print("="*50 + "\n")
 
-    app.run(host="0.0.0.0", port=5000, threaded=True, debug=False) this is the server code for the above
+    app.run(host="0.0.0.0", port=5000, threaded=True, debug=False)
