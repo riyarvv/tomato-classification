@@ -229,7 +229,8 @@ try:
             continue
 
         orig_h, orig_w = frame.shape[:2]
-        center_x, center_y = orig_w//2, orig_h//2
+        center_x = orig_w // 2
+        center_y = int(orig_h * 0.75)   # 75% down (bottom half center)
 
         zone_size = 120
         zone_left = center_x - zone_size//2
