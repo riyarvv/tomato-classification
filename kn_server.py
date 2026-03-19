@@ -1,3 +1,8 @@
+#!/usr/bin/env python3
+"""
+Agribot Controller Server - Controls ESP32 and coordinates with scan_pick.py
+"""
+
 from flask import Flask, Response, redirect, jsonify, render_template_string
 import serial
 import threading
@@ -6,6 +11,8 @@ import cv2
 import time
 import os
 import signal
+import json
+import queue
 
 app = Flask(__name__)
 
@@ -29,8 +36,12 @@ robot_status = {
     'state': 'idle',
     'current_target': None,
     'distance': 0,
-    'fps': 0
+    'fps': 0,
+    'count': 0
 }
+
+# Communication queue for count updates
+count_queue = queue.Queue()
 
 # ================================
 # SERIAL LISTENER THREAD
@@ -46,6 +57,7 @@ def read_serial():
 
                 if line.startswith("COUNT:"):
                     tomato_count = int(line.split(":")[1])
+                    robot_status['count'] = tomato_count
                     print(f"📊 Tomato count updated: {tomato_count}")
                 
                 elif line.startswith("STATUS:"):
@@ -55,6 +67,46 @@ def read_serial():
             except Exception as e:
                 print(f"Serial error: {e}")
         time.sleep(0.01)
+
+# ================================
+# READ SCAN_PICK.PY OUTPUT
+# ================================
+def read_scan_pick_output():
+    global scan_process, tomato_count, robot_status
+    
+    while scan_process and scan_process.poll() is None:
+        try:
+            # Read stdout line by line
+            line = scan_process.stdout.readline()
+            if line:
+                line = line.strip()
+                print(f"📟 scan_pick: {line}")
+                
+                # Look for count updates
+                if "🍅 Tomato Harvested!" in line:
+                    tomato_count += 1
+                    robot_status['count'] = tomato_count
+                    # Send to ESP32
+                    if ser:
+                        ser.write(f"COUNT:{tomato_count}\n".encode())
+                    
+                # Look for JSON status updates
+                if line.startswith("{") and line.endswith("}"):
+                    try:
+                        status_data = json.loads(line)
+                        if 'state' in status_data:
+                            robot_status['state'] = status_data['state']
+                        if 'count' in status_data:
+                            tomato_count = status_data['count']
+                            robot_status['count'] = tomato_count
+                        if 'distance' in status_data:
+                            robot_status['distance'] = status_data['distance']
+                    except:
+                        pass
+                        
+        except Exception as e:
+            print(f"Error reading scan_pick output: {e}")
+            time.sleep(0.1)
 
 # ================================
 # MAIN CONTROL PAGE
@@ -376,13 +428,13 @@ def video_feed():
 # ================================
 @app.route("/api/status")
 def api_status():
-    """Get current robot status from scan_pick.py if running"""
-    global robot_status, scan_process
+    """Get current robot status"""
+    global robot_status, tomato_count
     
-    # If scan_pick is running, try to get its status
+    robot_status['count'] = tomato_count
+    
+    # Try to get distance from scan_pick if running
     if scan_process and scan_process.poll() is None:
-        # You could implement a pipe or file-based communication here
-        # For now, we'll just return basic info
         robot_status['state'] = 'picking' if harvesting else 'scanning'
     
     return jsonify(robot_status)
@@ -444,17 +496,23 @@ def pick():
         scan_process = subprocess.Popen(
             [
                 "/home/rslvpi5/tomato-detection/tomato-classification/venv/bin/python",
-                "kinematics.py"
+                "-u",  # Unbuffered output
+                "scan_pick.py"
             ],
             cwd="/home/rslvpi5/tomato-detection/tomato-classification",
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
+            stderr=subprocess.PIPE,
+            text=True  # Use text mode for easier reading
         )
 
         harvesting = True
         robot_status['state'] = 'scanning'
+        
+        # Start output reader thread
+        reader_thread = threading.Thread(target=read_scan_pick_output, daemon=True)
+        reader_thread.start()
+        
         print("✅ scan_pick.py started successfully")
-
         return jsonify({"status": "started"})
 
     except Exception as e:
@@ -512,7 +570,7 @@ def home_position():
         stop_harvest()
         time.sleep(1)
     
-    # Send home command via serial to ESP32 if needed
+    # Send home command via serial to ESP32
     if ser:
         ser.write(b'H')
     
