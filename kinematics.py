@@ -9,7 +9,8 @@ import board
 import busio
 import cv2
 import numpy as np
-import RPi.GPIO as GPIO
+from gpiozero import DistanceSensor, Device
+from gpiozero.pins.lgpio import LGPIOFactory
 import threading
 import math
 from collections import deque
@@ -18,6 +19,9 @@ from adafruit_motor import servo
 from tflite_runtime.interpreter import Interpreter
 from flask import Flask, Response, jsonify
 import requests
+
+# Set the pin factory for gpiozero (for Raspberry Pi 5)
+Device.pin_factory = LGPIOFactory()
 
 # ==========================================
 # FLASK APP INITIALIZATION
@@ -30,56 +34,41 @@ app = Flask(__name__)
 class UltrasonicSensor:
     """
     Measures distance to tomato for Z-axis (depth)
-    Uses HC-SR04 ultrasonic sensor
+    Uses HC-SR04 ultrasonic sensor with gpiozero
     """
     
     def __init__(self, trig_pin=23, echo_pin=24):
-        self.TRIG = trig_pin
-        self.ECHO = echo_pin
         self.current_distance = 0
         self.running = True
         
         # For smooth readings
         self.distance_history = deque(maxlen=5)
         
-        # Setup GPIO
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setup(self.TRIG, GPIO.OUT)
-        GPIO.setup(self.ECHO, GPIO.IN)
+        # Setup gpiozero DistanceSensor
+        try:
+            self.sensor = DistanceSensor(echo=echo_pin, trigger=trig_pin, 
+                                         max_distance=4, threshold_distance=0.1)
+            print("✅ gpiozero DistanceSensor initialized")
+        except Exception as e:
+            print(f"⚠️ Error initializing DistanceSensor: {e}")
+            self.sensor = None
         
         # Start continuous reading thread
         self.thread = threading.Thread(target=self._continuous_reading)
         self.thread.daemon = True
         self.thread.start()
         print("✅ Ultrasonic sensor initialized")
-        
+    
     def _measure_distance(self):
-        """Single distance measurement"""
-        # Send trigger pulse
-        GPIO.output(self.TRIG, False)
-        time.sleep(0.000002)
-        GPIO.output(self.TRIG, True)
-        time.sleep(0.00001)
-        GPIO.output(self.TRIG, False)
-        
-        # Wait for echo start with timeout
-        timeout = time.time() + 0.1
-        pulse_start = time.time()
-        while GPIO.input(self.ECHO) == 0:
-            if time.time() > timeout:
+        """Single distance measurement using gpiozero"""
+        if self.sensor:
+            try:
+                # Get distance in cm (gpiozero returns meters)
+                distance = self.sensor.distance * 100
+                return round(distance, 2)
+            except:
                 return None
-            pulse_start = time.time()
-        
-        # Wait for echo end
-        while GPIO.input(self.ECHO) == 1:
-            if time.time() > timeout:
-                return None
-            pulse_end = time.time()
-        
-        # Calculate distance
-        pulse_duration = pulse_end - pulse_start
-        distance = pulse_duration * 17150  # Speed of sound formula
-        return round(distance, 2)
+        return None
     
     def _continuous_reading(self):
         """Background thread for continuous readings"""
@@ -100,7 +89,8 @@ class UltrasonicSensor:
     def cleanup(self):
         self.running = False
         time.sleep(0.2)
-        GPIO.cleanup()
+        if self.sensor:
+            self.sensor.close()
 
 # ==========================================
 # INVERSE KINEMATICS CLASS
@@ -848,4 +838,4 @@ finally:
     cap.release()
     pca.deinit()
     ultrasonic.cleanup()
-    print("✅ Cleanup complete. Goodbye!") 
+    print("✅ Cleanup complete. Goodbye!")
