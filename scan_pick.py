@@ -185,7 +185,8 @@ def pick_and_drop():
     except:
         pass
 
-    move_smooth(ELBOW_CH, LIMITS[ELBOW_CH]["pick"])
+    # Quick small jerk for detaching
+    move_smooth(ELBOW_CH, 25, step=2, delay=0.01)
 
     time.sleep(1)
 
