@@ -202,6 +202,36 @@ def pick_and_drop():
 
     print("✅ Pick Complete")
 
+
+#AUTOALIGN
+def auto_align(cx, center_x):
+    global scan_angle
+
+    error = cx - center_x   # difference from center
+
+    tolerance = 20   # small dead zone
+
+    if abs(error) < tolerance:
+        return True   # aligned
+
+    step = 1
+
+    if error > 0:
+        # tomato is RIGHT → move base RIGHT
+        scan_angle += step
+    else:
+        # tomato is LEFT → move base LEFT
+        scan_angle -= step
+
+    # safety limits
+    scan_angle = max(LIMITS[BASE_CH]["min"],
+                     min(LIMITS[BASE_CH]["max"], scan_angle))
+
+    move_smooth(BASE_CH, scan_angle, step=1, delay=0.01)
+    servos[CAMERA_CH].angle = servos[BASE_CH].angle
+
+    return False
+
 # ==========================================
 # MAIN LOOP
 # ==========================================
@@ -301,14 +331,18 @@ try:
                             cv2.FONT_HERSHEY_SIMPLEX,
                             0.6,(0,255,0),2)
 
-                if is_centered and not locked:
+                if not locked:
 
-                    print(f"🎯 Target locked at angle {scan_angle}")
-                    locked = True
-                    pick_and_drop()
-                    time.sleep(2)
-                    locked = False
-                    break
+                    aligned = auto_align(cx, center_x)
+                
+                    if aligned and zone_top < cy < zone_bottom:
+                        print(f"🎯 Perfectly aligned at angle {scan_angle}")
+                
+                        locked = True
+                        pick_and_drop()
+                        time.sleep(2)
+                        locked = False
+                        break
 
         curr_time = time.time()
         fps = 1/(curr_time-prev_time+1e-5)
