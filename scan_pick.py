@@ -33,8 +33,8 @@ for ch in [BASE_CH, SHOULDER_CH, ELBOW_CH, PITCH_CH, GRIPPER_CH, CAMERA_CH]:
 # ==========================================
 LIMITS = {
     BASE_CH:     {"min":10, "max":100},
-    SHOULDER_CH: {"neutral":160, "pick":150},
-    ELBOW_CH:    {"neutral":20,  "pick":40},
+    SHOULDER_CH: {"neutral":160, "pick":140},
+    ELBOW_CH:    {"neutral":20,  "pick":30},
     PITCH_CH:    {"neutral":90},
     GRIPPER_CH:  {"close":15, "open":100}
 }
