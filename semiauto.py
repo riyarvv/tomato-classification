@@ -76,9 +76,9 @@ class SimpleRobot:
                 
                 # Real servos
                 self.servos = {
-                    'base': {'obj': servo.Servo(self.pca.channels[0]), 'min': 10, 'max': 100, 'current': 55},
-                    'shoulder': {'obj': servo.Servo(self.pca.channels[1]), 'min': 30, 'max': 160, 'current': 90},
-                    'elbow': {'obj': servo.Servo(self.pca.channels[2]), 'min': 20, 'max': 90, 'current': 45},
+                    'base': {'obj': servo.Servo(self.pca.channels[0]), 'min': 10, 'max': 100, 'current': 20},
+                    'shoulder': {'obj': servo.Servo(self.pca.channels[1]), 'min': 30, 'max': 160, 'current': 160},
+                    'elbow': {'obj': servo.Servo(self.pca.channels[2]), 'min': 20, 'max': 90, 'current': 20},
                     'gripper': {'obj': servo.Servo(self.pca.channels[5]), 'min': 15, 'max': 100, 'current': 100},
                 }
                 print("✅ Real servos initialized")
@@ -93,9 +93,9 @@ class SimpleRobot:
         """Initialize simulated servos"""
         print("⚠️ Using SIMULATED servos (no hardware)")
         self.servos = {
-            'base': {'obj': SimulatedServo('Base', 10, 100), 'min': 10, 'max': 100, 'current': 55},
-            'shoulder': {'obj': SimulatedServo('Shoulder', 30, 160), 'min': 30, 'max': 160, 'current': 90},
-            'elbow': {'obj': SimulatedServo('Elbow', 20, 90), 'min': 20, 'max': 90, 'current': 45},
+            'base': {'obj': SimulatedServo('Base', 10, 100), 'min': 10, 'max': 100, 'current': 20},
+            'shoulder': {'obj': SimulatedServo('Shoulder', 30, 160), 'min': 30, 'max': 160, 'current': 160},
+            'elbow': {'obj': SimulatedServo('Elbow', 20, 90), 'min': 20, 'max': 90, 'current': 20},
             'gripper': {'obj': SimulatedServo('Gripper', 15, 100), 'min': 15, 'max': 100, 'current': 100},
         }
     
