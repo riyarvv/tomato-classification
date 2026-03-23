@@ -293,11 +293,12 @@ def track_tomato(cx, cy, center_x, center_y):
 # ==========================================
 # MAIN LOOP
 # ==========================================
+lock_counter = 0
 try:
     frame_count = 0
     while True:
 
-        if not locked and len(indices) == 0:
+        if not locked:
 
             scan_angle += scan_direction * 1
 
@@ -388,12 +389,11 @@ try:
                             (x,y-10),
                             cv2.FONT_HERSHEY_SIMPLEX,
                             0.6,(0,255,0),2)
-
+                
                 if not locked:
 
                     aligned = track_tomato(cx, cy, center_x, center_y)
 
-                    lock_counter = 0
                     if aligned:
                         lock_counter += 1
                     else:
