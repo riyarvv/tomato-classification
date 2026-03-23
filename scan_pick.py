@@ -3,7 +3,6 @@ import board
 import busio
 import cv2
 import numpy as np
-import math
 import threading
 import requests
 
@@ -13,30 +12,21 @@ from tflite_runtime.interpreter import Interpreter
 from gpiozero import DistanceSensor
 from flask import Flask, Response
 
-# ==========================================
-# 📏 ARM PARAMETERS
-# ==========================================
-L1, L2, L3 = 14.5, 13.5, 9.0
-BASE_HEIGHT = 6.5
-FOV_H, FOV_V = 48.8, 36.6
+print("🚀 scan_pick.py STARTED")
 
 # ==========================================
-# 🎯 SERVO OFFSETS (HOME = 20,160,20)
+# SERVO LIMITS + HOME
 # ==========================================
-BASE_OFFSET = 20
-SHOULDER_OFFSET = 160
-ELBOW_OFFSET = 20
-
-BASE_DIR = 1
-SHOULDER_DIR = -1
-ELBOW_DIR = 1
-
 BASE_MIN, BASE_MAX = 10, 100
-SH_MIN, SH_MAX = 120, 160
+SH_MIN, SH_MAX = 130, 170
 EL_MIN, EL_MAX = 20, 65
 
+HOME_BASE = 20
+HOME_SH = 160
+HOME_EL = 20
+
 # ==========================================
-# 🔌 HARDWARE INIT
+# HARDWARE
 # ==========================================
 sensor = DistanceSensor(echo=24, trigger=23)
 
@@ -54,17 +44,16 @@ servos = {
 }
 
 # ==========================================
-# 🎥 CAMERA THREAD
+# CAMERA THREAD
 # ==========================================
 cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 320)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
-cap.set(cv2.CAP_PROP_FPS, 30)
 
 frame = None
 lock = threading.Lock()
 
-def camera_thread():
+def cam_thread():
     global frame
     while True:
         ret, img = cap.read()
@@ -72,10 +61,10 @@ def camera_thread():
             with lock:
                 frame = img.copy()
 
-threading.Thread(target=camera_thread, daemon=True).start()
+threading.Thread(target=cam_thread, daemon=True).start()
 
 # ==========================================
-# 📺 FLASK STREAM
+# FLASK STREAM
 # ==========================================
 app = Flask(__name__)
 
@@ -85,55 +74,37 @@ def generate():
         with lock:
             if frame is None:
                 continue
-            ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-            frame_bytes = buffer.tobytes()
-
-        yield (b'--frame\r\n'
-               b'Content-Type: image/jpeg\r\n\r\n' +
-               frame_bytes + b'\r\n')
+            _, buffer = cv2.imencode('.jpg', frame)
+            yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' +
+                   buffer.tobytes() + b'\r\n')
 
 @app.route('/video_feed')
 def video_feed():
-    return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
+    return Response(generate(),
+        mimetype='multipart/x-mixed-replace; boundary=frame')
 
-threading.Thread(target=lambda: app.run(host="0.0.0.0", port=5001, threaded=True), daemon=True).start()
+threading.Thread(
+    target=lambda: app.run(host="0.0.0.0", port=5001, threaded=True),
+    daemon=True
+).start()
 
 # ==========================================
-# ⚙️ MOVEMENT
+# UTIL FUNCTIONS
 # ==========================================
 def move_smooth(ch, target, delay=0.01):
     current = servos[ch].angle or target
     step = 1 if target > current else -1
-    for angle in range(int(current), int(target), step):
-        servos[ch].angle = angle
+    for a in range(int(current), int(target), step):
+        servos[ch].angle = a
         time.sleep(delay)
 
-# ==========================================
-# 🏠 HOME
-# ==========================================
 def go_home():
-    print("🏠 HOME (20,160,20)")
-    move_smooth(BASE_CH, 20)
-    move_smooth(SHOULDER_CH, 160)
-    move_smooth(ELBOW_CH, 20)
+    print("🏠 HOME")
+    move_smooth(BASE_CH, HOME_BASE)
+    move_smooth(SHOULDER_CH, HOME_SH)
+    move_smooth(ELBOW_CH, HOME_EL)
     servos[GRIPPER_CH].angle = 100
 
-# ==========================================
-# ✋ GRIPPER
-# ==========================================
-def gripper_close():
-    for a in [100,90,75,60,45,30,15]:
-        servos[GRIPPER_CH].angle = a
-        time.sleep(0.3)
-
-def gripper_open():
-    for a in [15,30,45,60,75,90,100]:
-        servos[GRIPPER_CH].angle = a
-        time.sleep(0.3)
-
-# ==========================================
-# 📏 DISTANCE
-# ==========================================
 def get_distance():
     vals = []
     for _ in range(5):
@@ -141,87 +112,13 @@ def get_distance():
         time.sleep(0.05)
     return sum(vals)/len(vals)
 
-# ==========================================
-# 📍 PIXEL → WORLD
-# ==========================================
-def pixel_to_world(cx, cy, w, h, Z):
-    angle_x = (cx - w/2) / w * math.radians(FOV_H)
-    angle_y = (cy - h/2) / h * math.radians(FOV_V)
-    X = Z * math.tan(angle_x)
-    Y = Z * math.tan(angle_y)
-    return X, Y
+def gripper_close():
+    for a in [100,80,60,40,20,15]:
+        servos[GRIPPER_CH].angle = a
+        time.sleep(0.2)
 
 # ==========================================
-# 🤖 IK
-# ==========================================
-def inverse_kinematics(X, Y, Z):
-    r = math.sqrt(X**2 + Z**2)
-    h = BASE_HEIGHT - Y
-    D = (r**2 + h**2 - L1**2 - L2**2)/(2*L1*L2)
-
-    if abs(D) > 1:
-        return None
-
-    theta2 = math.acos(D)
-    theta1 = math.atan2(h, r) - math.atan2(
-        L2 * math.sin(theta2),
-        L1 + L2 * math.cos(theta2)
-    )
-
-    base = math.degrees(math.atan2(X, Z))
-    shoulder = math.degrees(theta1)
-    elbow = math.degrees(theta2)
-
-    return base, shoulder, elbow
-
-# ==========================================
-# 🔄 SERVO MAP
-# ==========================================
-def to_servo_angles(base, shoulder, elbow):
-    base_s = BASE_OFFSET + BASE_DIR * base
-    sh_s = SHOULDER_OFFSET + SHOULDER_DIR * shoulder
-    el_s = ELBOW_OFFSET + ELBOW_DIR * elbow
-
-    base_s = int(max(BASE_MIN, min(BASE_MAX, base_s)))
-    sh_s = int(max(SH_MIN, min(SH_MAX, sh_s)))
-    el_s = int(max(EL_MIN, min(EL_MAX, el_s)))
-
-    return base_s, sh_s, el_s
-
-# ==========================================
-# 🎯 MOVE TO TARGET
-# ==========================================
-def move_to_target(cx, cy, img):
-
-    Z = get_distance()
-    X, Y = pixel_to_world(cx, cy, img.shape[1], img.shape[0], Z)
-
-    angles = inverse_kinematics(X, Y, Z)
-    if angles is None:
-        print("❌ Out of reach")
-        return
-
-    base, sh, el = angles
-    b, s, e = to_servo_angles(base, sh, el)
-
-    print("🎯 Moving:", b, s, e)
-
-    move_smooth(BASE_CH, b)
-    move_smooth(SHOULDER_CH, s)
-    move_smooth(ELBOW_CH, e)
-
-    gripper_close()
-
-    try:
-        requests.get("http://raspberrypi.local:5000/increment")
-    except:
-        pass
-
-    time.sleep(1)
-    go_home()
-
-# ==========================================
-# 🧠 YOLO
+# YOLO
 # ==========================================
 interpreter = Interpreter(model_path="best_float16.tflite", num_threads=4)
 interpreter.allocate_tensors()
@@ -233,19 +130,121 @@ CONF = 0.6
 RIPE_ID = 2
 
 # ==========================================
-# 🔄 SCANNING
+# TRACK + PICK (CORE FIX)
 # ==========================================
-scan_angle = 20
-scan_dir = 1
-locked = False
+def track_and_pick():
+
+    print("🎯 Tracking...")
+
+    while True:
+
+        with lock:
+            if frame is None:
+                continue
+            img = frame.copy()
+
+        h, w = img.shape[:2]
+
+        # YOLO
+        resized = cv2.resize(img, (inp[0]['shape'][2], inp[0]['shape'][1]))
+        rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
+        rgb = rgb.astype(np.float32)/255
+        rgb = np.expand_dims(rgb, axis=0)
+
+        interpreter.set_tensor(inp[0]['index'], rgb)
+        interpreter.invoke()
+
+        output = interpreter.get_tensor(out[0]['index'])[0].T
+
+        found = False
+
+        for pred in output:
+
+            x,y,w_box,h_box = pred[:4]
+            scores = pred[4:]
+
+            cid = np.argmax(scores)
+            conf = scores[cid]
+
+            if conf > CONF and cid == RIPE_ID:
+
+                found = True
+
+                cx = int(x * w)
+                cy = int(y * h)
+
+                # DRAW BOX
+                xmin = int((x - w_box/2) * w)
+                ymin = int((y - h_box/2) * h)
+                xmax = int((x + w_box/2) * w)
+                ymax = int((y + h_box/2) * h)
+
+                cv2.rectangle(img,(xmin,ymin),(xmax,ymax),(0,255,0),2)
+                cv2.circle(img,(cx,cy),5,(0,255,0),-1)
+
+                # ===== ALIGN =====
+                center_x = w//2
+                center_y = int(h*0.7)
+
+                error_x = cx - center_x
+                error_y = cy - center_y
+
+                # BASE
+                base = servos[BASE_CH].angle + int(error_x * 0.05)
+                base = max(BASE_MIN, min(BASE_MAX, base))
+                servos[BASE_CH].angle = base
+
+                # SHOULDER
+                shoulder = servos[SHOULDER_CH].angle - int(error_y * 0.03)
+                shoulder = max(SH_MIN, min(SH_MAX, shoulder))
+                servos[SHOULDER_CH].angle = shoulder
+
+                # ===== PICK =====
+                if abs(error_x) < 20 and abs(error_y) < 20:
+
+                    print("✅ ALIGNED")
+
+                    while True:
+
+                        dist = get_distance()
+
+                        if dist < 6:
+                            print("📍 Reached")
+                            break
+
+                        current = servos[ELBOW_CH].angle
+
+                        if current >= EL_MAX:
+                            break
+
+                        move_smooth(ELBOW_CH, current + 2, 0.05)
+
+                    print("🤏 GRIP")
+                    gripper_close()
+
+                    try:
+                        requests.get("http://raspberrypi.local:5000/increment")
+                    except:
+                        pass
+
+                    go_home()
+                    return
+
+                break
+
+        if not found:
+            print("❌ Lost target")
+            return
 
 # ==========================================
-# 🚀 START
+# MAIN LOOP
 # ==========================================
 go_home()
-time.sleep(3)
+time.sleep(2)
 
-frame_count = 0
+scan_angle = 20
+direction = 1
+locked = False
 
 while True:
 
@@ -256,15 +255,15 @@ while True:
 
     # 🔄 SCAN
     if not locked:
-        scan_angle += scan_dir * 1
-        if scan_angle >= 100 or scan_angle <= 20:
-            scan_dir *= -1
-        move_smooth(BASE_CH, scan_angle, delay=0.01)
+        scan_angle += direction
 
-    frame_count += 1
-    if frame_count % 3 != 0:
-        continue
+        if scan_angle >= BASE_MAX or scan_angle <= BASE_MIN:
+            direction *= -1
 
+        servos[BASE_CH].angle = scan_angle
+        time.sleep(0.02)
+
+    # YOLO QUICK CHECK
     resized = cv2.resize(img, (inp[0]['shape'][2], inp[0]['shape'][1]))
     rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
     rgb = rgb.astype(np.float32)/255
@@ -277,47 +276,28 @@ while True:
 
     for pred in output:
 
-        x,y,w,h = pred[:4]
         scores = pred[4:]
-
         cid = np.argmax(scores)
         conf = scores[cid]
 
         if conf > CONF and cid == RIPE_ID:
 
-            h_img, w_img = img.shape[:2]
+            print("🍅 DETECTED → LOCK")
 
-            cx = int(x * w_img)
-            cy = int(y * h_img)
-
-            xmin = int((x - w/2) * w_img)
-            ymin = int((y - h/2) * h_img)
-            xmax = int((x + w/2) * w_img)
-            ymax = int((y + h/2) * h_img)
-
-            # 📦 DRAW
-            cv2.rectangle(img, (xmin,ymin), (xmax,ymax), (0,255,0), 2)
-            cv2.circle(img, (cx,cy), 5, (0,0,255), -1)
-            cv2.putText(img, f"Ripe {conf:.2f}",
-                        (xmin,ymin-10),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.6,(0,255,0),2)
-
-            if not locked:
-                print("🍅 TARGET LOCKED")
-
-                locked = True
-
-                with lock:
-                    frame = img.copy()
-
-                move_to_target(cx, cy, img)
-
-                time.sleep(2)
-                locked = False
+            locked = True
+            track_and_pick()
+            locked = False
 
             break
 
-    # update stream frame
     with lock:
         frame = img.copy()
+
+    cv2.imshow("Detection", img)
+
+    if cv2.waitKey(1) == 27:
+        break
+
+cap.release()
+cv2.destroyAllWindows()
+pca.deinit()
