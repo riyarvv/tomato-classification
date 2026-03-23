@@ -173,9 +173,9 @@ class SafeRobotArm:
         
         print("🏠 Moving to home position...")
         positions = {
-            'base': 55,
-            'shoulder': 90,
-            'elbow': 45,
+            'base': 20,
+            'shoulder': 160,
+            'elbow': 20,
             'wrist': 90,
             'gripper': 100
         }
