@@ -3,445 +3,267 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Semi-Automatic Tomato Harvester</title>
+    <title>Safe Tomato Harvester Control</title>
     <script src="https://cdn.socket.io/4.5.0/socket.io.min.js"></script>
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
             color: white;
             padding: 20px;
+            margin: 0;
         }
-        
         .container {
-            max-width: 1400px;
+            max-width: 1200px;
             margin: 0 auto;
         }
-        
-        h1 {
-            text-align: center;
-            margin-bottom: 20px;
-            font-size: 2.5em;
-        }
-        
+        h1 { text-align: center; margin-bottom: 20px; }
         .grid {
             display: grid;
             grid-template-columns: 1fr 400px;
             gap: 20px;
-            margin-bottom: 20px;
         }
-        
         .card {
             background: rgba(255,255,255,0.95);
             border-radius: 15px;
             padding: 20px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
             color: #333;
         }
-        
         .video-container {
-            position: relative;
             background: #000;
             border-radius: 10px;
             overflow: hidden;
         }
-        
-        #videoFeed {
-            width: 100%;
-            height: auto;
-            display: block;
-        }
-        
-        .status-panel {
-            margin-bottom: 20px;
-        }
-        
-        .status-item {
-            padding: 10px;
-            margin: 10px 0;
-            background: #f5f5f5;
-            border-radius: 8px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .status-label {
-            font-weight: bold;
-            color: #667eea;
-        }
-        
-        .status-value {
-            font-family: monospace;
-            font-size: 1.2em;
-        }
-        
-        .pick-button {
-            background: linear-gradient(135deg, #4caf50 0%, #45a049 100%);
+        #videoFeed { width: 100%; height: auto; }
+        .safety-warning {
+            background: #ff9800;
             color: white;
-            border: none;
-            padding: 20px;
-            font-size: 1.5em;
-            border-radius: 10px;
-            cursor: pointer;
-            width: 100%;
-            margin: 10px 0;
-            transition: all 0.3s ease;
-        }
-        
-        .pick-button:hover:not(:disabled) {
-            transform: scale(1.05);
-            box-shadow: 0 5px 20px rgba(76, 175, 80, 0.4);
-        }
-        
-        .pick-button:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-        }
-        
-        .emergency-button {
-            background: #f44336;
-            color: white;
-            border: none;
             padding: 15px;
-            font-size: 1.2em;
             border-radius: 10px;
-            cursor: pointer;
-            width: 100%;
-            margin: 10px 0;
-            transition: all 0.3s ease;
+            margin-bottom: 20px;
+            text-align: center;
+            font-weight: bold;
         }
-        
-        .emergency-button:hover {
-            background: #d32f2f;
-            transform: scale(1.02);
-        }
-        
-        .control-button {
-            background: #667eea;
-            color: white;
+        .btn {
+            padding: 12px 20px;
             border: none;
-            padding: 12px;
             border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
             cursor: pointer;
             margin: 5px;
             transition: all 0.3s ease;
         }
-        
-        .control-button:hover {
-            background: #5a67d8;
-            transform: translateY(-2px);
+        .btn-enable { background: #4caf50; color: white; width: 100%; font-size: 1.2em; padding: 15px; }
+        .btn-disable { background: #f44336; color: white; width: 100%; }
+        .btn-home { background: #2196f3; color: white; }
+        .btn-emergency { background: #ff0000; color: white; font-size: 1.2em; padding: 15px; margin-top: 10px; }
+        .servo-slider { width: 100%; margin: 10px 0; }
+        .status-item {
+            background: #f5f5f5;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 8px;
+            display: flex;
+            justify-content: space-between;
         }
-        
-        .toggle-switch {
-            position: relative;
-            display: inline-block;
-            width: 60px;
-            height: 34px;
-        }
-        
-        .toggle-switch input {
-            opacity: 0;
-            width: 0;
-            height: 0;
-        }
-        
-        .slider {
-            position: absolute;
-            cursor: pointer;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: #ccc;
-            transition: .4s;
-            border-radius: 34px;
-        }
-        
-        .slider:before {
-            position: absolute;
-            content: "";
-            height: 26px;
-            width: 26px;
-            left: 4px;
-            bottom: 4px;
-            background-color: white;
-            transition: .4s;
-            border-radius: 50%;
-        }
-        
-        input:checked + .slider {
-            background-color: #4caf50;
-        }
-        
-        input:checked + .slider:before {
-            transform: translateX(26px);
-        }
-        
         .led {
-            width: 15px;
-            height: 15px;
+            width: 20px;
+            height: 20px;
             border-radius: 50%;
             display: inline-block;
             margin-right: 8px;
         }
-        
-        .led-green {
-            background: #4caf50;
-            box-shadow: 0 0 5px #4caf50;
-            animation: pulse 1s infinite;
-        }
-        
-        .led-red {
-            background: #f44336;
-            box-shadow: 0 0 5px #f44336;
-        }
-        
-        .led-yellow {
-            background: #ffc107;
-            box-shadow: 0 0 5px #ffc107;
-        }
-        
+        .led-red { background: #f44336; box-shadow: 0 0 5px #f44336; }
+        .led-green { background: #4caf50; box-shadow: 0 0 5px #4caf50; animation: pulse 1s infinite; }
+        .led-yellow { background: #ffc107; box-shadow: 0 0 5px #ffc107; }
         @keyframes pulse {
             0% { opacity: 0.5; }
             50% { opacity: 1; }
             100% { opacity: 0.5; }
         }
-        
-        .alert {
-            background: #ff9800;
-            color: white;
-            padding: 10px;
-            border-radius: 8px;
-            margin: 10px 0;
-            text-align: center;
-        }
-        
-        @media (max-width: 768px) {
-            .grid {
-                grid-template-columns: 1fr;
-            }
-        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🍅 Semi-Automatic Tomato Harvester</h1>
+        <h1>🍅 SAFE Tomato Harvester Control</h1>
+        
+        <div class="safety-warning">
+            ⚠️ SERVOS START DISABLED - Click "ENABLE SERVOS" to begin
+        </div>
         
         <div class="grid">
-            <!-- Video Feed -->
             <div class="card">
-                <h2>📷 Live View</h2>
+                <h2>📷 Camera View</h2>
                 <div class="video-container">
-                    <img id="videoFeed" src="/video_feed" alt="Video Feed">
-                </div>
-                <div class="alert" id="instructionAlert" style="display:none;">
-                    🎯 Tomato detected in center zone! Ready to pick.
+                    <img id="videoFeed" src="/video_feed">
                 </div>
             </div>
             
-            <!-- Control Panel -->
             <div class="card">
                 <h2>🎮 Control Panel</h2>
                 
-                <div class="status-panel">
-                    <div class="status-item">
-                        <span class="status-label">Robot Status:</span>
-                        <span class="status-value">
-                            <span id="statusLed" class="led led-green"></span>
-                            <span id="statusText">Ready</span>
-                        </span>
-                    </div>
-                    <div class="status-item">
-                        <span class="status-label">Auto-Align:</span>
-                        <span class="status-value">
-                            <label class="toggle-switch">
-                                <input type="checkbox" id="autoAlignToggle" checked>
-                                <span class="slider"></span>
-                            </label>
-                        </span>
-                    </div>
-                    <div class="status-item">
-                        <span class="status-label">Distance to tomato:</span>
-                        <span class="status-value" id="distance">-- cm</span>
-                    </div>
-                    <div class="status-item">
-                        <span class="status-label">Tomatoes detected:</span>
-                        <span class="status-value" id="tomatoCount">0</span>
-                    </div>
+                <div class="status-item">
+                    <span>Servo Status:</span>
+                    <span id="servoStatus">DISABLED</span>
+                </div>
+                <div class="status-item">
+                    <span>Emergency Stop:</span>
+                    <span id="emergencyStatus">INACTIVE</span>
                 </div>
                 
-                <button id="pickButton" class="pick-button" disabled>
-                    🍅 PICK TOMATO
+                <button id="enableBtn" class="btn btn-enable" onclick="enableServos()">
+                    🔌 ENABLE SERVOS
+                </button>
+                <button id="disableBtn" class="btn btn-disable" onclick="disableServos()" disabled>
+                    ⚡ DISABLE SERVOS
                 </button>
                 
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-                    <button class="control-button" onclick="moveToPosition('home')">
-                        🏠 Home
-                    </button>
-                    <button class="control-button" onclick="moveToPosition('scan')">
-                        🔍 Scan
-                    </button>
-                    <button class="control-button" onclick="moveToPosition('pickup')">
-                        📍 Pickup Position
-                    </button>
-                    <button class="control-button" onclick="moveToPosition('release')">
-                        📦 Release Position
-                    </button>
+                <button id="homeBtn" class="btn btn-home" onclick="moveHome()" disabled>
+                    🏠 MOVE TO HOME
+                </button>
+                
+                <hr>
+                
+                <h3>Individual Servo Control</h3>
+                <div id="servoControls">
+                    <label>Base (10-100°):</label>
+                    <input type="range" id="base" min="10" max="100" step="1" value="55" disabled>
+                    <span id="baseVal">55°</span><br>
+                    
+                    <label>Shoulder (30-160°):</label>
+                    <input type="range" id="shoulder" min="30" max="160" step="1" value="90" disabled>
+                    <span id="shoulderVal">90°</span><br>
+                    
+                    <label>Elbow (20-90°):</label>
+                    <input type="range" id="elbow" min="20" max="90" step="1" value="45" disabled>
+                    <span id="elbowVal">45°</span><br>
+                    
+                    <label>Gripper (15-100°):</label>
+                    <input type="range" id="gripper" min="15" max="100" step="1" value="100" disabled>
+                    <span id="gripperVal">100°</span><br>
                 </div>
                 
-                <button id="emergencyButton" class="emergency-button">
+                <button id="emergencyBtn" class="btn btn-emergency" onclick="emergencyStop()">
                     🚨 EMERGENCY STOP
                 </button>
-                <button id="resetButton" class="control-button" style="background:#666; width:100%; margin-top:10px;">
+                <button id="resetBtn" class="btn" onclick="resetEmergency()" style="background:#666; width:100%; margin-top:5px;">
                     🔄 Reset Emergency
                 </button>
             </div>
         </div>
-        
-        <div class="card">
-            <h2>📋 Instructions</h2>
-            <ol style="margin-left: 20px; line-height: 1.8;">
-                <li><strong>Auto-Align ON</strong> - Robot automatically finds and centers on ripe tomatoes</li>
-                <li>Wait for tomato to enter the <strong>white target zone</strong> in the center</li>
-                <li>The <strong>PICK TOMATO</strong> button will become green when ready</li>
-                <li>Press <strong>PICK TOMATO</strong> to start the harvesting sequence</li>
-                <li>Robot will: Approach → Grasp → Lift → Move to cart → Release → Return home</li>
-                <li>Use <strong>EMERGENCY STOP</strong> if anything goes wrong</li>
-                <li>Toggle <strong>Auto-Align</strong> off for manual control</li>
-            </ol>
-        </div>
     </div>
     
     <script>
-        var socket = io();
-        var readyToPick = false;
+        var servosEnabled = false;
         
-        // Socket events
-        socket.on('connect', function() {
-            console.log('Connected to robot');
-            updateStatus(true);
-        });
+        // Setup sliders
+        function setupSlider(id, min, max, callback) {
+            $('#' + id).on('input', function() {
+                var angle = parseInt($(this).val());
+                $('#' + id + 'Val').text(angle + '°');
+                if (servosEnabled) {
+                    $.post('/api/servo/' + id, JSON.stringify({angle: angle}), 
+                        function(data) { console.log(data); })
+                    .fail(function() { alert('Failed to move servo'); });
+                }
+            });
+        }
         
-        socket.on('disconnect', function() {
-            updateStatus(false);
-        });
+        setupSlider('base', 10, 100);
+        setupSlider('shoulder', 30, 160);
+        setupSlider('elbow', 20, 90);
+        setupSlider('gripper', 15, 100);
         
-        socket.on('status', function(data) {
-            $('#autoAlignToggle').prop('checked', data.auto_align);
-            if (data.state === 'ready_to_pick') {
-                readyToPick = true;
-                $('#pickButton').prop('disabled', false);
-                $('#instructionAlert').show();
-                $('#statusLed').removeClass('led-green led-yellow').addClass('led-green');
-                $('#statusText').text('READY TO PICK');
-            } else if (data.state === 'picking') {
-                readyToPick = false;
-                $('#pickButton').prop('disabled', true);
-                $('#instructionAlert').hide();
-                $('#statusLed').removeClass('led-green').addClass('led-yellow');
-                $('#statusText').text('PICKING...');
-            } else {
-                readyToPick = false;
-                $('#pickButton').prop('disabled', true);
-                $('#instructionAlert').hide();
-                $('#statusLed').removeClass('led-yellow').addClass('led-green');
-                $('#statusText').text('Auto-Align Active');
-            }
-        });
+        function enableServos() {
+            $.post('/api/enable', function(data) {
+                servosEnabled = true;
+                $('#servoStatus').text('ENABLED').css('color', '#4caf50');
+                $('#enableBtn').prop('disabled', true);
+                $('#disableBtn').prop('disabled', false);
+                $('#homeBtn').prop('disabled', false);
+                $('input[type="range"]').prop('disabled', false);
+                alert('✅ Servos enabled! Move to home position first.');
+            }).fail(function() {
+                alert('Failed to enable servos');
+            });
+        }
         
-        socket.on('aligned', function(data) {
-            if (data.ready) {
-                readyToPick = true;
-                $('#pickButton').prop('disabled', false);
-                $('#instructionAlert').show();
-            }
-        });
+        function disableServos() {
+            $.post('/api/disable', function(data) {
+                servosEnabled = false;
+                $('#servoStatus').text('DISABLED').css('color', '#f44336');
+                $('#enableBtn').prop('disabled', false);
+                $('#disableBtn').prop('disabled', true);
+                $('#homeBtn').prop('disabled', true);
+                $('input[type="range"]').prop('disabled', true);
+            });
+        }
         
-        // Button handlers
-        $('#pickButton').click(function() {
-            if (readyToPick) {
-                $.post('/api/pick', function(data) {
-                    console.log('Pick started:', data);
-                }).fail(function() {
-                    alert('Cannot pick - robot not ready');
-                });
-            }
-        });
+        function moveHome() {
+            $.post('/api/home', function(data) {
+                console.log(data);
+            });
+        }
         
-        $('#emergencyButton').click(function() {
-            if (confirm('⚠️ EMERGENCY STOP! This will freeze all movement. Continue?')) {
+        function emergencyStop() {
+            if (confirm('⚠️ EMERGENCY STOP! This will disable all servos. Continue?')) {
                 $.post('/api/emergency', function(data) {
-                    console.log('Emergency stop activated');
-                    $('#statusLed').removeClass('led-green led-yellow').addClass('led-red');
-                    $('#statusText').text('EMERGENCY STOP');
-                    $('#pickButton').prop('disabled', true);
+                    servosEnabled = false;
+                    $('#servoStatus').text('EMERGENCY STOP').css('color', '#ff0000');
+                    $('#emergencyStatus').text('ACTIVE').css('color', '#ff0000');
+                    $('#enableBtn').prop('disabled', true);
+                    $('#disableBtn').prop('disabled', true);
+                    $('#homeBtn').prop('disabled', true);
+                    $('input[type="range"]').prop('disabled', true);
                 });
             }
-        });
+        }
         
-        $('#resetButton').click(function() {
+        function resetEmergency() {
             $.post('/api/reset', function(data) {
-                console.log('Emergency reset');
-                refreshStatus();
-            });
-        });
-        
-        $('#autoAlignToggle').change(function() {
-            var enabled = $(this).is(':checked');
-            $.post('/api/toggle_align', function(data) {
-                console.log('Auto-align:', data.auto_align);
-            });
-        });
-        
-        function moveToPosition(position) {
-            $.post('/api/move/' + position, function(data) {
-                console.log('Moving to:', position);
-                readyToPick = false;
-                $('#pickButton').prop('disabled', true);
-                $('#instructionAlert').hide();
+                $('#emergencyStatus').text('INACTIVE').css('color', '#4caf50');
+                $('#enableBtn').prop('disabled', false);
+                alert('Emergency reset. Click "Enable Servos" to continue.');
             });
         }
         
         function refreshStatus() {
             $.get('/api/status', function(data) {
-                $('#distance').text(data.distance.toFixed(1) + ' cm');
-                $('#autoAlignToggle').prop('checked', data.auto_align);
-                
                 if (data.emergency_stopped) {
-                    $('#statusLed').removeClass('led-green led-yellow').addClass('led-red');
-                    $('#statusText').text('EMERGENCY STOP');
-                    $('#pickButton').prop('disabled', true);
-                } else if (data.state === 'ready_to_pick') {
-                    $('#statusLed').removeClass('led-red led-yellow').addClass('led-green');
-                    $('#statusText').text('READY TO PICK');
-                    $('#pickButton').prop('disabled', false);
+                    $('#emergencyStatus').text('ACTIVE').css('color', '#ff0000');
                 } else {
-                    $('#statusLed').removeClass('led-red led-yellow').addClass('led-green');
-                    $('#statusText').text('Auto-Align Active');
-                    $('#pickButton').prop('disabled', true);
+                    $('#emergencyStatus').text('INACTIVE').css('color', '#4caf50');
+                }
+                
+                if (data.servos_enabled) {
+                    servosEnabled = true;
+                    $('#servoStatus').text('ENABLED').css('color', '#4caf50');
+                    $('#enableBtn').prop('disabled', true);
+                    $('#disableBtn').prop('disabled', false);
+                    $('#homeBtn').prop('disabled', false);
+                    $('input[type="range"]').prop('disabled', false);
+                } else {
+                    servosEnabled = false;
+                    $('#servoStatus').text('DISABLED').css('color', '#f44336');
+                    $('#enableBtn').prop('disabled', false);
+                    $('#disableBtn').prop('disabled', true);
+                    $('#homeBtn').prop('disabled', true);
+                    $('input[type="range"]').prop('disabled', true);
+                }
+                
+                // Update slider values
+                for (var servo in data.positions) {
+                    if ($('#' + servo).length) {
+                        $('#' + servo).val(data.positions[servo]);
+                        $('#' + servo + 'Val').text(Math.round(data.positions[servo]) + '°');
+                    }
                 }
             });
         }
         
-        function updateStatus(connected) {
-            if (connected) {
-                refreshStatus();
-                setInterval(refreshStatus, 2000);
-            } else {
-                $('#statusLed').removeClass('led-green').addClass('led-red');
-                $('#statusText').text('Disconnected');
-            }
-        }
-        
-        // Initial status
+        setInterval(refreshStatus, 2000);
         refreshStatus();
     </script>
 </body>
