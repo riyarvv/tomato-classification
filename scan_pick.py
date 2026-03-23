@@ -62,6 +62,7 @@ cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 240)
 cap.set(cv2.CAP_PROP_FPS, 30)
 
 frame = None
+display_frame = None
 lock = threading.Lock()
 
 def camera_thread():
@@ -80,12 +81,12 @@ threading.Thread(target=camera_thread, daemon=True).start()
 app = Flask(__name__)
 
 def generate():
-    global frame
+    global display_frame
     while True:
         with lock:
-            if frame is None:
+            if display_frame is None:
                 continue
-            ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            ret, buffer = cv2.imencode('.jpg', display_frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
             frame_bytes = buffer.tobytes()
 
         yield (b'--frame\r\n'
@@ -132,13 +133,23 @@ def gripper_open():
         time.sleep(0.3)
 
 # ==========================================
-# 📏 DISTANCE
+# 📏 DISTANCE (FIXED)
 # ==========================================
 def get_distance():
     vals = []
     for _ in range(5):
-        vals.append(sensor.distance * 100)
+        d = sensor.distance * 100
+
+        if d == 0 or d > 200:
+            continue
+
+        vals.append(d)
         time.sleep(0.05)
+
+    if len(vals) == 0:
+        print("⚠️ Ultrasonic FAILED → using default Z = 25cm")
+        return 25
+
     return sum(vals)/len(vals)
 
 # ==========================================
@@ -147,9 +158,12 @@ def get_distance():
 def pixel_to_world(cx, cy, w, h, Z):
     angle_x = (cx - w/2) / w * math.radians(FOV_H)
     angle_y = (cy - h/2) / h * math.radians(FOV_V)
+
     X = -Z * math.tan(angle_x)
-    X = X - 1.5
+    X = X - 1.5   # 🔧 tune this if needed
+
     Y = Z * math.tan(angle_y)
+
     return X, Y
 
 # ==========================================
@@ -158,6 +172,7 @@ def pixel_to_world(cx, cy, w, h, Z):
 def inverse_kinematics(X, Y, Z):
     r = math.sqrt(X**2 + Z**2)
     h = BASE_HEIGHT - Y
+
     D = (r**2 + h**2 - L1**2 - L2**2)/(2*L1*L2)
 
     if abs(D) > 1:
@@ -195,9 +210,18 @@ def to_servo_angles(base, shoulder, elbow):
 def move_to_target(cx, cy, img):
 
     Z = get_distance()
+
+    if Z < 5:
+        print("⚠️ Z too small, skipping")
+        return
+
     X, Y = pixel_to_world(cx, cy, img.shape[1], img.shape[0], Z)
 
+    print(f"📏 Z={Z:.2f}")
+    print(f"🌍 X={X:.2f}, Y={Y:.2f}")
+
     angles = inverse_kinematics(X, Y, Z)
+
     if angles is None:
         print("❌ Out of reach")
         return
@@ -219,15 +243,13 @@ def move_to_target(cx, cy, img):
         pass
 
     time.sleep(1)
+
+    # RETURN
     move_smooth(SHOULDER_CH, 160)
     move_smooth(ELBOW_CH, 20)
-    
-    # ✅ RETURN BASE HOME
     move_smooth(BASE_CH, 20)
-    
-    # ✅ DROP
+
     gripper_open()
-    
     time.sleep(1)
 
 # ==========================================
@@ -239,7 +261,7 @@ interpreter.allocate_tensors()
 inp = interpreter.get_input_details()
 out = interpreter.get_output_details()
 
-CONF = 0.6
+CONF = 0.5
 RIPE_ID = 2
 
 # ==========================================
@@ -266,7 +288,7 @@ while True:
 
     # 🔄 SCAN
     if not locked:
-        scan_angle += scan_dir * 1
+        scan_angle += scan_dir
         if scan_angle >= 100 or scan_angle <= 20:
             scan_dir *= -1
         move_smooth(BASE_CH, scan_angle, delay=0.01)
@@ -289,49 +311,44 @@ while True:
 
         x, y, w, h = pred[:4]
         scores = pred[4:]
-    
+
         cid = np.argmax(scores)
         conf = scores[cid]
-    
-        if conf > 0.5 and cid == RIPE_ID:
-    
+
+        if conf > CONF and cid == RIPE_ID:
+
             h_img, w_img = img.shape[:2]
-    
-            # YOLO format FIX
+
             cx = int(x * w_img)
             cy = int(y * h_img)
-    
+
             bw = int(w * w_img)
             bh = int(h * h_img)
-    
-            xmin = int(cx - bw / 2)
-            ymin = int(cy - bh / 2)
-            xmax = int(cx + bw / 2)
-            ymax = int(cy + bh / 2)
-    
-            # ✅ DRAW BOX
-            cv2.rectangle(img, (xmin, ymin), (xmax, ymax), (0, 255, 0), 2)
-    
-            # ✅ CENTER DOT
-            cv2.circle(img, (cx, cy), 6, (0, 0, 255), -1)
-    
+
+            xmin = int(cx - bw/2)
+            ymin = int(cy - bh/2)
+            xmax = int(cx + bw/2)
+            ymax = int(cy + bh/2)
+
+            # DRAW
+            cv2.rectangle(img, (xmin, ymin), (xmax, ymax), (0,255,0), 2)
+            cv2.circle(img, (cx, cy), 6, (0,0,255), -1)
+
             cv2.putText(img, f"Ripe {conf:.2f}",
-                        (xmin, ymin - 10),
+                        (xmin, ymin-10),
                         cv2.FONT_HERSHEY_SIMPLEX,
-                        0.6, (0, 255, 0), 2)
-    
+                        0.6, (0,255,0), 2)
+
             print(f"🍅 Detected at ({cx},{cy})")
-    
+
             if not locked:
                 locked = True
-    
                 move_to_target(cx, cy, img)
-    
                 time.sleep(2)
                 locked = False
-    
+
             break
 
-    # update stream frame
+    # ✅ SHOW PROCESSED FRAME (FIXED)
     with lock:
-        frame = img.copy()
+        display_frame = img.copy()
