@@ -219,7 +219,16 @@ def move_to_target(cx, cy, img):
         pass
 
     time.sleep(1)
-    go_home()
+    move_smooth(SHOULDER_CH, 160)
+    move_smooth(ELBOW_CH, 20)
+    
+    # ✅ RETURN BASE HOME
+    move_smooth(BASE_CH, 20)
+    
+    # ✅ DROP
+    gripper_open()
+    
+    time.sleep(1)
 
 # ==========================================
 # 🧠 YOLO
