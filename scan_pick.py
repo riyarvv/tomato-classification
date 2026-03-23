@@ -203,6 +203,9 @@ def move_to_target(cx, cy, frame):
         print("⚠️ Server update failed")
 
     go_home()
+    time.sleep(5)
+    
+    print("🟢 Waiting before detection...")
 
 # ==========================================
 # YOLO LOAD
@@ -229,7 +232,7 @@ if not cap.isOpened():
 else:
     print("✅ Camera started")
 
-CONF = 0.3
+CONF = 0.6
 RIPE_ID = 2
 
 # ==========================================
@@ -274,10 +277,11 @@ while True:
         cid = np.argmax(scores)
         conf = scores[cid]
 
-        if conf > 0.3:
+        if conf > 0.6:
             print(f"🔍 Detected class {cid} with confidence {conf:.2f}")
 
         if conf > CONF and cid == RIPE_ID:
+            print("🚨 PICK TRIGGERED")
 
             detected = True
             print("🍅 RIPE TOMATO DETECTED")
