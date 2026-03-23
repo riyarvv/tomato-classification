@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-FIXED Robot Control - Single File Version
-Fixed variable scope issues
+Robot Control with YOUR Neutral Angles
+Base: 20°, Shoulder: 160°, Elbow: 20°, Gripper: 100°
 """
 
 import time
@@ -59,14 +59,22 @@ class SimulatedServo:
     def angle(self, value):
         self.set_angle(value)
 
-# Robot controller
+# Robot controller with YOUR angles
 class SimpleRobot:
     def __init__(self):
         self.servos = {}
         self.all_enabled = False
         self.emergency_stopped = False
         self.pca = None
-        self.hardware_available = HARDWARE_AVAILABLE  # Use global variable
+        self.hardware_available = HARDWARE_AVAILABLE
+        
+        # YOUR NEUTRAL ANGLES
+        self.neutral_angles = {
+            'base': 20,
+            'shoulder': 160,
+            'elbow': 20,
+            'gripper': 100
+        }
         
         if self.hardware_available:
             try:
@@ -74,14 +82,38 @@ class SimpleRobot:
                 self.pca = PCA9685(self.i2c)
                 self.pca.frequency = 50
                 
-                # Real servos
+                # Real servos with YOUR angles
                 self.servos = {
-                    'base': {'obj': servo.Servo(self.pca.channels[0]), 'min': 10, 'max': 100, 'current': 20},
-                    'shoulder': {'obj': servo.Servo(self.pca.channels[1]), 'min': 30, 'max': 160, 'current': 160},
-                    'elbow': {'obj': servo.Servo(self.pca.channels[2]), 'min': 20, 'max': 90, 'current': 20},
-                    'gripper': {'obj': servo.Servo(self.pca.channels[5]), 'min': 15, 'max': 100, 'current': 100},
+                    'base': {
+                        'obj': servo.Servo(self.pca.channels[0]), 
+                        'min': 10, 
+                        'max': 100, 
+                        'current': self.neutral_angles['base']  # 20°
+                    },
+                    'shoulder': {
+                        'obj': servo.Servo(self.pca.channels[1]), 
+                        'min': 30, 
+                        'max': 160, 
+                        'current': self.neutral_angles['shoulder']  # 160°
+                    },
+                    'elbow': {
+                        'obj': servo.Servo(self.pca.channels[2]), 
+                        'min': 20, 
+                        'max': 90, 
+                        'current': self.neutral_angles['elbow']  # 20°
+                    },
+                    'gripper': {
+                        'obj': servo.Servo(self.pca.channels[5]), 
+                        'min': 15, 
+                        'max': 100, 
+                        'current': self.neutral_angles['gripper']  # 100°
+                    },
                 }
-                print("✅ Real servos initialized")
+                print("✅ Real servos initialized with YOUR neutral angles")
+                print(f"   Base: {self.neutral_angles['base']}°")
+                print(f"   Shoulder: {self.neutral_angles['shoulder']}°")
+                print(f"   Elbow: {self.neutral_angles['elbow']}°")
+                print(f"   Gripper: {self.neutral_angles['gripper']}°")
             except Exception as e:
                 print(f"❌ Hardware error: {e}")
                 self.hardware_available = False
@@ -90,20 +122,40 @@ class SimpleRobot:
             self._init_simulation()
     
     def _init_simulation(self):
-        """Initialize simulated servos"""
-        print("⚠️ Using SIMULATED servos (no hardware)")
+        """Initialize simulated servos with YOUR angles"""
+        print("⚠️ Using SIMULATED servos with YOUR neutral angles")
         self.servos = {
-            'base': {'obj': SimulatedServo('Base', 10, 100), 'min': 10, 'max': 100, 'current': 20},
-            'shoulder': {'obj': SimulatedServo('Shoulder', 30, 160), 'min': 30, 'max': 160, 'current': 160},
-            'elbow': {'obj': SimulatedServo('Elbow', 20, 90), 'min': 20, 'max': 90, 'current': 20},
-            'gripper': {'obj': SimulatedServo('Gripper', 15, 100), 'min': 15, 'max': 100, 'current': 100},
+            'base': {
+                'obj': SimulatedServo('Base', 10, 100), 
+                'min': 10, 
+                'max': 100, 
+                'current': self.neutral_angles['base']  # 20°
+            },
+            'shoulder': {
+                'obj': SimulatedServo('Shoulder', 30, 160), 
+                'min': 30, 
+                'max': 160, 
+                'current': self.neutral_angles['shoulder']  # 160°
+            },
+            'elbow': {
+                'obj': SimulatedServo('Elbow', 20, 90), 
+                'min': 20, 
+                'max': 90, 
+                'current': self.neutral_angles['elbow']  # 20°
+            },
+            'gripper': {
+                'obj': SimulatedServo('Gripper', 15, 100), 
+                'min': 15, 
+                'max': 100, 
+                'current': self.neutral_angles['gripper']  # 100°
+            },
         }
     
     def enable_all(self):
         if not self.emergency_stopped:
             self.all_enabled = True
             print("✅ All servos enabled")
-            # Move to home
+            # Move to home (YOUR neutral position)
             self.move_to_home()
             return True
         return False
@@ -116,7 +168,7 @@ class SimpleRobot:
         if not self.all_enabled or self.emergency_stopped:
             return False
         if name in self.servos:
-            # Clamp angle
+            # Clamp angle to safe limits
             angle = max(self.servos[name]['min'], min(self.servos[name]['max'], angle))
             self.servos[name]['obj'].angle = angle
             self.servos[name]['current'] = angle
@@ -125,17 +177,25 @@ class SimpleRobot:
         return False
     
     def move_to_home(self):
+        """Move to YOUR neutral position"""
         if not self.all_enabled or self.emergency_stopped:
             return False
-        print("🏠 Moving to home...")
-        self.set_servo('base', 20)
+        print("🏠 Moving to YOUR neutral position...")
+        print(f"   Base: {self.neutral_angles['base']}°")
+        print(f"   Shoulder: {self.neutral_angles['shoulder']}°")
+        print(f"   Elbow: {self.neutral_angles['elbow']}°")
+        print(f"   Gripper: {self.neutral_angles['gripper']}°")
+        
+        # Move in safe order
+        self.set_servo('base', self.neutral_angles['base'])
         time.sleep(0.3)
-        self.set_servo('shoulder', 160)
+        self.set_servo('shoulder', self.neutral_angles['shoulder'])
         time.sleep(0.3)
-        self.set_servo('elbow', 20)
+        self.set_servo('elbow', self.neutral_angles['elbow'])
         time.sleep(0.3)
-        self.set_servo('gripper', 100)
-        print("✅ At home")
+        self.set_servo('gripper', self.neutral_angles['gripper'])
+        
+        print("✅ At neutral position")
         return True
     
     def emergency_stop(self):
@@ -151,7 +211,8 @@ class SimpleRobot:
         return {
             'servos_enabled': self.all_enabled,
             'emergency_stopped': self.emergency_stopped,
-            'positions': {name: self.servos[name]['current'] for name in self.servos}
+            'positions': {name: self.servos[name]['current'] for name in self.servos},
+            'neutral_angles': self.neutral_angles
         }
     
     def cleanup(self):
@@ -159,7 +220,7 @@ class SimpleRobot:
             self.pca.deinit()
             print("✅ PCA9685 cleaned up")
 
-# Camera class
+# Camera class (same as before)
 class SimpleCamera:
     def __init__(self):
         self.cap = None
@@ -197,7 +258,6 @@ class SimpleCamera:
     
     def get_frame(self):
         if not self.available:
-            # Create a blank frame with text
             if CAMERA_AVAILABLE:
                 blank = np.zeros((480, 640, 3), dtype=np.uint8)
                 cv2.putText(blank, "Camera Not Available", (150, 240), 
@@ -211,12 +271,12 @@ class SimpleCamera:
             self.cap.release()
             print("✅ Camera released")
 
-# HTML template (embedded)
+# HTML template with YOUR angles
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Robot Arm Control</title>
+    <title>Robot Arm Control - Your Angles</title>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
@@ -378,6 +438,14 @@ HTML_TEMPLATE = """
             font-size: 12px;
             margin-left: 10px;
         }
+        .neutral-badge {
+            background: #4caf50;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 10px;
+            margin-left: 5px;
+        }
         @media (max-width: 768px) {
             .grid {
                 grid-template-columns: 1fr;
@@ -387,7 +455,7 @@ HTML_TEMPLATE = """
 </head>
 <body>
     <div class="container">
-        <h1>🤖 Tomato Harvesting Robot Control</h1>
+        <h1>🤖 Tomato Harvesting Robot - Your Angles</h1>
         
         <div class="warning" id="warningMsg">
             ⚠️ SERVOS START DISABLED - Click "ENABLE SERVOS" first
@@ -428,7 +496,7 @@ HTML_TEMPLATE = """
                         ⚡ DISABLE SERVOS
                     </button>
                     <button id="homeBtn" class="btn-home" onclick="moveHome()" disabled>
-                        🏠 MOVE TO HOME
+                        🏠 MOVE TO HOME (20°,160°,20°,100°)
                     </button>
                     
                     <hr>
@@ -436,25 +504,33 @@ HTML_TEMPLATE = """
                     <h3>⚙️ Individual Servo Control</h3>
                     
                     <div class="servo-control">
-                        <label>Base Rotation (10-100°)</label>
-                        <input type="range" id="base" class="slider" min="10" max="100" step="1" value="55" disabled>
-                        <span id="baseVal" class="angle-value">55°</span>
+                        <label>Base Rotation (10-100°) 
+                            <span class="neutral-badge">Neutral: 20°</span>
+                        </label>
+                        <input type="range" id="base" class="slider" min="10" max="100" step="1" value="20" disabled>
+                        <span id="baseVal" class="angle-value">20°</span>
                     </div>
                     
                     <div class="servo-control">
-                        <label>Shoulder (30-160°)</label>
-                        <input type="range" id="shoulder" class="slider" min="30" max="160" step="1" value="90" disabled>
-                        <span id="shoulderVal" class="angle-value">90°</span>
+                        <label>Shoulder (30-160°) 
+                            <span class="neutral-badge">Neutral: 160°</span>
+                        </label>
+                        <input type="range" id="shoulder" class="slider" min="30" max="160" step="1" value="160" disabled>
+                        <span id="shoulderVal" class="angle-value">160°</span>
                     </div>
                     
                     <div class="servo-control">
-                        <label>Elbow (20-90°)</label>
-                        <input type="range" id="elbow" class="slider" min="20" max="90" step="1" value="45" disabled>
-                        <span id="elbowVal" class="angle-value">45°</span>
+                        <label>Elbow (20-90°) 
+                            <span class="neutral-badge">Neutral: 20°</span>
+                        </label>
+                        <input type="range" id="elbow" class="slider" min="20" max="90" step="1" value="20" disabled>
+                        <span id="elbowVal" class="angle-value">20°</span>
                     </div>
                     
                     <div class="servo-control">
-                        <label>Gripper (15-100°)</label>
+                        <label>Gripper (15-100°) 
+                            <span class="neutral-badge">Neutral: 100° (Open)</span>
+                        </label>
                         <input type="range" id="gripper" class="slider" min="15" max="100" step="1" value="100" disabled>
                         <span id="gripperVal" class="angle-value">100°</span>
                     </div>
@@ -475,8 +551,8 @@ HTML_TEMPLATE = """
         var servosEnabled = false;
         var hardwareMode = false;
         
-        // Setup sliders
-        function setupSlider(id) {
+        // Setup sliders with YOUR neutral values
+        function setupSlider(id, neutralValue) {
             $('#' + id).on('input', function() {
                 var angle = parseInt($(this).val());
                 $('#' + id + 'Val').text(angle + '°');
@@ -492,10 +568,10 @@ HTML_TEMPLATE = """
             });
         }
         
-        setupSlider('base');
-        setupSlider('shoulder');
-        setupSlider('elbow');
-        setupSlider('gripper');
+        setupSlider('base', 20);
+        setupSlider('shoulder', 160);
+        setupSlider('elbow', 20);
+        setupSlider('gripper', 100);
         
         function enableServos() {
             $.post('/api/enable', function(data) {
@@ -506,7 +582,7 @@ HTML_TEMPLATE = """
                 $('#disableBtn').prop('disabled', false);
                 $('#homeBtn').prop('disabled', false);
                 $('.slider').prop('disabled', false);
-                $('#warningMsg').html('✅ SERVOS ENABLED - Moving to home position');
+                $('#warningMsg').html('✅ SERVOS ENABLED - Moving to neutral position (20°,160°,20°,100°)');
                 setTimeout(function() {
                     $('#warningMsg').html('✅ Servos active - Use controls carefully');
                 }, 3000);
@@ -531,7 +607,7 @@ HTML_TEMPLATE = """
         function moveHome() {
             if (servosEnabled) {
                 $.post('/api/home', function() {
-                    console.log('Moving home');
+                    console.log('Moving to neutral position');
                 });
             }
         }
@@ -586,6 +662,18 @@ HTML_TEMPLATE = """
                 }
                 
                 $('#cameraStatus').text(data.camera ? 'Active' : 'Not Available');
+                
+                // Update sliders with current positions
+                if (data.positions) {
+                    $('#base').val(data.positions.base);
+                    $('#baseVal').text(Math.round(data.positions.base) + '°');
+                    $('#shoulder').val(data.positions.shoulder);
+                    $('#shoulderVal').text(Math.round(data.positions.shoulder) + '°');
+                    $('#elbow').val(data.positions.elbow);
+                    $('#elbowVal').text(Math.round(data.positions.elbow) + '°');
+                    $('#gripper').val(data.positions.gripper);
+                    $('#gripperVal').text(Math.round(data.positions.gripper) + '°');
+                }
             });
         }
         
@@ -635,7 +723,6 @@ def video_feed():
                            b'Content-Type: image/jpeg\r\n\r\n' + 
                            buffer.tobytes() + b'\r\n')
             elif CAMERA_AVAILABLE:
-                # Create a blank frame
                 blank = np.zeros((480, 640, 3), dtype=np.uint8)
                 cv2.putText(blank, "Camera Not Available", (150, 240), 
                            cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
@@ -693,7 +780,7 @@ def api_reset():
 # Main
 if __name__ == '__main__':
     print("\n" + "="*60)
-    print("🚀 Robot Control Interface - FIXED VERSION")
+    print("🚀 Robot Control Interface - YOUR NEUTRAL ANGLES")
     print("="*60)
     
     if robot.hardware_available:
@@ -701,18 +788,20 @@ if __name__ == '__main__':
     else:
         print("⚠️ SIMULATION MODE - No real hardware")
     
-    if CAMERA_AVAILABLE:
-        print("✅ Camera module loaded")
-    else:
-        print("⚠️ Camera module not loaded")
-    
     print("\n📡 Web interface:")
     print("   http://localhost:5003")
     print("   http://raspberrypi.local:5003")
+    
+    print("\n🎯 YOUR NEUTRAL POSITION:")
+    print(f"   Base: {robot.neutral_angles['base']}°")
+    print(f"   Shoulder: {robot.neutral_angles['shoulder']}°")
+    print(f"   Elbow: {robot.neutral_angles['elbow']}°")
+    print(f"   Gripper: {robot.neutral_angles['gripper']}° (Open)")
+    
     print("\n⚠️  SAFETY INSTRUCTIONS:")
     print("   1. Servos start DISABLED - nothing will move")
     print("   2. Click 'ENABLE SERVOS' to activate")
-    print("   3. Robot will move to home position when enabled")
+    print("   3. Robot will move to YOUR neutral position")
     print("   4. Keep mouse near EMERGENCY STOP button")
     print("\nPress Ctrl+C to exit\n")
     print("="*60 + "\n")
