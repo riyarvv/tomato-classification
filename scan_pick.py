@@ -3,260 +3,252 @@ import board
 import busio
 import cv2
 import numpy as np
+import math
+import requests
+
 from adafruit_pca9685 import PCA9685
 from adafruit_motor import servo
 from tflite_runtime.interpreter import Interpreter
 from gpiozero import DistanceSensor
 
-# ==============================
-# SENSOR
-# ==============================
-sensor = DistanceSensor(echo=24, trigger=23)
-
-# ==============================
-# ARM PARAMETERS
-# ==============================
-L1 = 14.50
-L2 = 13.50
+# ==========================================
+# 📏 ARM PARAMETERS (YOUR VALUES)
+# ==========================================
+L1 = 14.5
+L2 = 13.5
 L3 = 9.0
-BASE_HEIGHT = 6.50
-
-BASE_MIN, BASE_MAX = 10, 100
-SHOULDER_NEUTRAL = 160
-SHOULDER_DOWN = 120
-ELBOW_NEUTRAL = 20
-ELBOW_MAX = 65
+BASE_HEIGHT = 6.5
 
 FOV_H = 48.8
 FOV_V = 36.6
 
-# ==============================
-# PCA9685
-# ==============================
+# ==========================================
+# ⚙️ SERVO CALIBRATION (TUNE IF NEEDED)
+# ==========================================
+BASE_OFFSET = 55
+SHOULDER_OFFSET = 140
+ELBOW_OFFSET = 20
+
+BASE_DIR = 1
+SHOULDER_DIR = -1
+ELBOW_DIR = 1
+
+# ==========================================
+# LIMITS
+# ==========================================
+BASE_MIN, BASE_MAX = 10, 100
+SH_MIN, SH_MAX = 120, 160
+EL_MIN, EL_MAX = 20, 65
+
+# ==========================================
+# HARDWARE INIT
+# ==========================================
+sensor = DistanceSensor(echo=24, trigger=23)
+
 i2c = busio.I2C(board.SCL, board.SDA)
 pca = PCA9685(i2c)
 pca.frequency = 50
 
 BASE_CH, SHOULDER_CH, ELBOW_CH, GRIPPER_CH = 0,1,2,5
 
-servos = {}
-for ch in [BASE_CH, SHOULDER_CH, ELBOW_CH, GRIPPER_CH]:
-    servos[ch] = servo.Servo(pca.channels[ch], min_pulse=500, max_pulse=2500)
+servos = {
+    BASE_CH: servo.Servo(pca.channels[BASE_CH]),
+    SHOULDER_CH: servo.Servo(pca.channels[SHOULDER_CH]),
+    ELBOW_CH: servo.Servo(pca.channels[ELBOW_CH]),
+    GRIPPER_CH: servo.Servo(pca.channels[GRIPPER_CH]),
+}
 
-# ==============================
-# SMOOTH MOVE
-# ==============================
-def move_smooth(ch, target, step=1, delay=0.01):
+# ==========================================
+# SMOOTH MOVEMENT
+# ==========================================
+def move_smooth(ch, target, delay=0.01):
     current = servos[ch].angle or target
-    current = int(current)
-    target = int(target)
+    step = 1 if target > current else -1
 
-    if current < target:
-        rng = range(current, target, step)
-    else:
-        rng = range(current, target, -step)
-
-    for a in rng:
-        servos[ch].angle = a
+    for angle in range(int(current), int(target), step):
+        servos[ch].angle = angle
         time.sleep(delay)
 
-    servos[ch].angle = target
-
-# ==============================
-# SLOW GRIPPER (YOUR VERSION)
-# ==============================
-def gripper_open_slow():
-    steps = [15, 30, 45, 60, 75, 90, 100]
-    for angle in steps:
-        servos[GRIPPER_CH].angle = angle
-        time.sleep(1.5)
-
-def gripper_close_slow():
-    steps = [100, 90, 75, 60, 45, 30, 15]
-    for angle in steps:
-        servos[GRIPPER_CH].angle = angle
-        time.sleep(1.5)
-
-# ==============================
-# DISTANCE
-# ==============================
+# ==========================================
+# DISTANCE (ULTRASONIC)
+# ==========================================
 def get_distance():
     vals = []
     for _ in range(5):
         vals.append(sensor.distance * 100)
-        time.sleep(0.02)
+        time.sleep(0.05)
     return sum(vals)/len(vals)
 
-# ==============================
-# PIXEL → ANGLE
-# ==============================
-def pixel_to_angle(cx, cy, w, h):
-    dx = cx - w/2
-    dy = cy - h/2
+# ==========================================
+# PIXEL → WORLD
+# ==========================================
+def pixel_to_world(cx, cy, w, h, Z):
 
-    ax = (dx / w) * FOV_H
-    ay = (dy / h) * FOV_V
+    angle_x = (cx - w/2) / w * math.radians(FOV_H)
+    angle_y = (cy - h/2) / h * math.radians(FOV_V)
 
-    return np.radians(ax), np.radians(ay)
+    X = Z * math.tan(angle_x)
+    Y = Z * math.tan(angle_y)
 
-# ==============================
-# ANGLE → XYZ
-# ==============================
-def get_xyz(cx, cy, w, h, dist):
-    ax, ay = pixel_to_angle(cx, cy, w, h)
+    return X, Y
 
-    Z = dist - 2   # calibration
-    X = Z * np.tan(ax)
-    Y = Z * np.tan(ay)
-
-    return X, Y, Z
-
-# ==============================
+# ==========================================
 # INVERSE KINEMATICS
-# ==============================
+# ==========================================
 def inverse_kinematics(X, Y, Z):
 
-    # BASE
-    base = np.degrees(np.arctan2(X, Z))
-    base = 55 + base   # center offset
+    r = math.sqrt(X**2 + Z**2)
+    h = BASE_HEIGHT - Y
 
-    # PLANAR
-    r = np.sqrt(X**2 + Z**2)
-    y = Y - BASE_HEIGHT
+    D = (r**2 + h**2 - L1**2 - L2**2)/(2*L1*L2)
 
-    D = np.sqrt(r**2 + y**2)
+    if abs(D) > 1:
+        return None
 
-    # ELBOW
-    cos_elbow = (D**2 - L1**2 - L2**2)/(2*L1*L2)
-    cos_elbow = np.clip(cos_elbow, -1, 1)
-    elbow = np.degrees(np.arccos(cos_elbow))
+    theta2 = math.acos(D)
+    theta1 = math.atan2(h, r) - math.atan2(
+        L2 * math.sin(theta2),
+        L1 + L2 * math.cos(theta2)
+    )
 
-    # SHOULDER
-    alpha = np.arctan2(y, r)
-    beta = np.arccos((L1**2 + D**2 - L2**2)/(2*L1*D))
-    shoulder = np.degrees(alpha + beta)
-
-    # 🔴 MAP TO YOUR SERVO RANGE
-    shoulder = SHOULDER_NEUTRAL - shoulder
-    elbow = ELBOW_NEUTRAL + elbow
+    base = math.degrees(math.atan2(X, Z))
+    shoulder = math.degrees(theta1)
+    elbow = math.degrees(theta2)
 
     return base, shoulder, elbow
 
-# ==============================
-# MOVE TO XYZ
-# ==============================
-def move_to_xyz(X, Y, Z):
+# ==========================================
+# CONVERT TO SERVO ANGLES
+# ==========================================
+def to_servo_angles(base, shoulder, elbow):
 
-    base, shoulder, elbow = inverse_kinematics(X, Y, Z)
+    base_s = BASE_OFFSET + BASE_DIR * base
+    shoulder_s = SHOULDER_OFFSET + SHOULDER_DIR * shoulder
+    elbow_s = ELBOW_OFFSET + ELBOW_DIR * elbow
 
-    base = max(BASE_MIN, min(BASE_MAX, base))
-    shoulder = max(SHOULDER_DOWN, min(SHOULDER_NEUTRAL, shoulder))
-    elbow = max(ELBOW_NEUTRAL, min(ELBOW_MAX, elbow))
+    base_s = int(max(BASE_MIN, min(BASE_MAX, base_s)))
+    shoulder_s = int(max(SH_MIN, min(SH_MAX, shoulder_s)))
+    elbow_s = int(max(EL_MIN, min(EL_MAX, elbow_s)))
 
-    print(f"Angles → B:{base:.1f} S:{shoulder:.1f} E:{elbow:.1f}")
+    return base_s, shoulder_s, elbow_s
 
-    move_smooth(BASE_CH, base, step=1, delay=0.01)
-    move_smooth(SHOULDER_CH, shoulder, step=1, delay=0.01)
-    move_smooth(ELBOW_CH, elbow, step=1, delay=0.01)
+# ==========================================
+# INITIAL POSITION
+# ==========================================
+def go_home():
+    servos[BASE_CH].angle = BASE_OFFSET
+    servos[SHOULDER_CH].angle = SHOULDER_OFFSET
+    servos[ELBOW_CH].angle = ELBOW_OFFSET
+    servos[GRIPPER_CH].angle = 100
 
-# ==============================
+# ==========================================
 # PICK FUNCTION
-# ==============================
-def pick(X, Y, Z):
+# ==========================================
+def move_to_target(cx, cy, frame):
 
-    print("🍅 Picking...")
+    h, w = frame.shape[:2]
 
-    move_to_xyz(X, Y, Z + 5)   # approach
-    move_to_xyz(X, Y, Z)       # final
+    Z = get_distance()
+    print(f"Distance: {Z:.2f} cm")
 
-    gripper_close_slow()
+    X, Y = pixel_to_world(cx, cy, w, h, Z)
+    print(f"World → X:{X:.2f}, Y:{Y:.2f}, Z:{Z:.2f}")
 
-    import requests
+    angles = inverse_kinematics(X, Y, Z)
 
+    if angles is None:
+        print("❌ Out of reach")
+        return
+
+    base, shoulder, elbow = angles
+    print("IK:", base, shoulder, elbow)
+
+    base_s, shoulder_s, elbow_s = to_servo_angles(base, shoulder, elbow)
+    print("Servo:", base_s, shoulder_s, elbow_s)
+
+    move_smooth(BASE_CH, base_s)
+    move_smooth(SHOULDER_CH, shoulder_s)
+    move_smooth(ELBOW_CH, elbow_s)
+
+    time.sleep(1)
+
+    # CLOSE GRIPPER
+    servos[GRIPPER_CH].angle = 15
+    time.sleep(1)
+
+    # 🍅 UPDATE COUNT ON SERVER
     try:
         requests.get("http://raspberrypi.local:5000/increment")
+        print("📡 Count updated")
     except:
-        pass
+        print("⚠️ Server update failed")
 
-    move_to_xyz(X, Y, Z + 8)   # lift
+    # RETURN HOME
+    go_home()
 
-    gripper_open_slow()
-
-    print("✅ Done")
-
-# ==============================
-# YOLO
-# ==============================
-MODEL_PATH = "/home/rslvpi5/tomato-detection/tomato-classification/best_float16.tflite"
-interpreter = Interpreter(model_path=MODEL_PATH)
+# ==========================================
+# LOAD MODEL
+# ==========================================
+interpreter = Interpreter(model_path="best_float16.tflite")
 interpreter.allocate_tensors()
 
-input_details = interpreter.get_input_details()
-output_details = interpreter.get_output_details()
+inp = interpreter.get_input_details()
+out = interpreter.get_output_details()
 
-H, W = input_details[0]['shape'][1:3]
-
-# ==============================
+# ==========================================
 # CAMERA
-# ==============================
+# ==========================================
 cap = cv2.VideoCapture(0)
 
-# ==============================
-# INITIAL POSITION
-# ==============================
-servos[BASE_CH].angle = 55
-servos[SHOULDER_CH].angle = SHOULDER_NEUTRAL
-servos[ELBOW_CH].angle = ELBOW_NEUTRAL
-gripper_open_slow()
+CONF = 0.3
+RIPE_ID = 2
 
-# ==============================
-# MAIN LOOP
-# ==============================
+# ==========================================
+# START
+# ==========================================
+go_home()
+time.sleep(2)
+
 while True:
 
     ret, frame = cap.read()
     if not ret:
         break
 
-    h, w = frame.shape[:2]
-
-    img = cv2.resize(frame, (W, H))
+    img = cv2.resize(frame, (inp[0]['shape'][2], inp[0]['shape'][1]))
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    img = img.astype(np.float32)/255.0
+    img = img.astype(np.float32)/255
     img = np.expand_dims(img, axis=0)
 
-    interpreter.set_tensor(input_details[0]['index'], img)
+    interpreter.set_tensor(inp[0]['index'], img)
     interpreter.invoke()
 
-    output = interpreter.get_tensor(output_details[0]['index'])[0].T
+    output = interpreter.get_tensor(out[0]['index'])[0].T
 
     for pred in output:
 
-        x, y, bw, bh = pred[:4]
+        x,y,w,h = pred[:4]
         scores = pred[4:]
+
         cid = np.argmax(scores)
         conf = scores[cid]
 
-        if conf > 0.4 and cid == 2:
+        if conf > CONF and cid == RIPE_ID:
 
-            cx = int(x * w)
-            cy = int(y * h)
+            cx = int(x * frame.shape[1])
+            cy = int(y * frame.shape[0])
 
-            dist = get_distance()
+            cv2.circle(frame, (cx,cy), 5, (0,255,0), -1)
 
-            X, Y, Z = get_xyz(cx, cy, w, h, dist)
-
-            print(f"XYZ → {X:.2f}, {Y:.2f}, {Z:.2f}")
-
-            pick(X, Y, Z)
-
+            move_to_target(cx, cy, frame)
             time.sleep(2)
             break
 
-    cv2.imshow("frame", frame)
-    if cv2.waitKey(1) & 0xFF == 27:
+    cv2.imshow("Tomato Detection", frame)
+
+    if cv2.waitKey(1) == 27:
         break
 
 cap.release()
-pca.deinit()
 cv2.destroyAllWindows()
+pca.deinit()
