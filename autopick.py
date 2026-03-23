@@ -10,6 +10,9 @@ from tflite_runtime.interpreter import Interpreter
 from flask import Flask, Response
 import threading
 
+from gpiozero import DistanceSensor
+sensor = DistanceSensor(echo=24, trigger=23)
+
 app = Flask(__name__)
 
 # ==========================================
@@ -79,6 +82,17 @@ def gripper_close_slow():
     for angle in steps:
         servos[GRIPPER_CH].angle = angle
         time.sleep(1.5)
+
+# ==========================================
+# ULTRASONIC DISTANCE
+# ==========================================
+
+def get_stable_distance():
+    readings = []
+    for _ in range(5):
+        readings.append(sensor.distance * 100)
+        time.sleep(0.05)
+    return sum(readings)/len(readings)
 
 # ==========================================
 # 6️⃣ INITIAL POSITION
@@ -176,6 +190,36 @@ def pick_and_drop():
 
     move_smooth(SHOULDER_CH, LIMITS[SHOULDER_CH]["pick"])
 
+    # 🔥 MOVE FORWARD BASED ON DISTANCE (Z-axis)
+    while True:
+    
+        dist = get_stable_distance()
+        print(f"Distance: {dist:.2f} cm")
+    
+        # ignore bad readings
+        if dist <= 0 or dist > 100:
+            continue
+    
+        # stop when close enough
+        if dist < 5:
+            print("📍 Reached tomato")
+            break
+    
+        current = servos[ELBOW_CH].angle
+    
+        if current >= 50:
+            print("⚠️ Max reach")
+            break
+    
+        # small forward step
+        move_smooth(ELBOW_CH, current + 2, step=1, delay=0.05)
+    
+    time.sleep(0.5)
+    
+    # small final push (IMPORTANT)
+    move_smooth(ELBOW_CH, servos[ELBOW_CH].angle + 2, step=1, delay=0.02)
+    
+    # NOW GRIP
     gripper_close_slow()
     time.sleep(1)
 
@@ -204,33 +248,47 @@ def pick_and_drop():
 
 
 #AUTOALIGN
-def auto_align(cx, center_x):
+def track_tomato(cx, cy, center_x, center_y):
     global scan_angle
 
-    error = cx - center_x   # difference from center
+    # =========================
+    # X AXIS (BASE - FAST RESPONSE)
+    # =========================
+    error_x = cx - center_x
 
-    tolerance = 20   # small dead zone
+    # proportional control (IMPORTANT)
+    step_x = int(error_x * 0.04)
 
-    if abs(error) < tolerance:
-        return True   # aligned
+    scan_angle += step_x
 
-    step = 1
-
-    if error > 0:
-        # tomato is RIGHT → move base RIGHT
-        scan_angle += step
-    else:
-        # tomato is LEFT → move base LEFT
-        scan_angle -= step
-
-    # safety limits
     scan_angle = max(LIMITS[BASE_CH]["min"],
                      min(LIMITS[BASE_CH]["max"], scan_angle))
 
     move_smooth(BASE_CH, scan_angle, step=1, delay=0.01)
     servos[CAMERA_CH].angle = servos[BASE_CH].angle
 
-    return False
+    # =========================
+    # Y AXIS (SHOULDER)
+    # =========================
+    error_y = cy - center_y
+    shoulder = servos[SHOULDER_CH].angle
+
+    step_y = int(error_y * 0.02)
+
+    new_angle = shoulder - step_y   # minus because screen inverted
+
+    # safe limits
+    new_angle = max(130, min(170, new_angle))
+
+    move_smooth(SHOULDER_CH, new_angle, step=1, delay=0.02)
+
+    # =========================
+    # CHECK IF ALIGNED ENOUGH
+    # =========================
+    if abs(error_x) < 25 and abs(error_y) < 25:
+        return True
+    else:
+        return False
 
 # ==========================================
 # MAIN LOOP
@@ -239,7 +297,7 @@ try:
     frame_count = 0
     while True:
 
-        if not locked:
+        if not locked and len(indices) == 0:
 
             scan_angle += scan_direction * 1
 
@@ -333,16 +391,24 @@ try:
 
                 if not locked:
 
-                    aligned = auto_align(cx, center_x)
-                
-                    if aligned and zone_top < cy < zone_bottom:
-                        print(f"🎯 Perfectly aligned at angle {scan_angle}")
-                
+                    aligned = track_tomato(cx, cy, center_x, center_y)
+
+                    lock_counter = 0
+                    if aligned:
+                        lock_counter += 1
+                    else:
+                        lock_counter = 0
+                    
+                    if lock_counter > 5:
+                        print("🎯 Stable Lock Achieved")
+                    
                         locked = True
                         pick_and_drop()
                         time.sleep(2)
                         locked = False
+                        lock_counter = 0
                         break
+                
 
         curr_time = time.time()
         fps = 1/(curr_time-prev_time+1e-5)
