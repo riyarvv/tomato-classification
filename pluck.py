@@ -1,206 +1,284 @@
-import cv2
-import serial
 import time
-from ultralytics import YOLO
+import cv2
+import numpy as np
+import math
+import board
+import busio
 
-# ================= SERIAL =================
-ser = serial.Serial('COM5', 9600, timeout=1)
-time.sleep(2)
+from adafruit_pca9685 import PCA9685
+from adafruit_motor import servo
+from tflite_runtime.interpreter import Interpreter
+from gpiozero import DistanceSensor
 
-# ================= MODEL =================
-model = YOLO("best_float16.tflite", task="detect")
+# ==========================================
+# 📏 ARM PARAMETERS
+# ==========================================
+L1, L2 = 14.5, 13.5
+BASE_HEIGHT = 6.5
 
-# ================= BASE SETTINGS =================
-BASE_MIN, BASE_MAX = 5, 160
-FRAME_CENTER = 305
-BASE_HOME = 20
+# ==========================================
+# 🎯 SERVO SETTINGS
+# ==========================================
+BASE_OFFSET = 20
+SHOULDER_OFFSET = 160
+ELBOW_OFFSET = 20
 
-base_angle = BASE_HOME
-scan_dir = 1
-centered = False
+BASE_DIR = 1
+SHOULDER_DIR = -1
+ELBOW_DIR = 1
 
-# ================= ARM POSES =================
-POSES = {
-    "FAR": (110, 15, 70),
-    "MID": (125, 10, 65),
-    "CLOSE": (140, 6, 60)
+BASE_MIN, BASE_MAX = 10, 100
+SH_MIN, SH_MAX = 120, 160
+EL_MIN, EL_MAX = 20, 65
+
+# ==========================================
+# 🔌 HARDWARE INIT
+# ==========================================
+sensor = DistanceSensor(echo=24, trigger=23)
+
+i2c = busio.I2C(board.SCL, board.SDA)
+pca = PCA9685(i2c)
+pca.frequency = 50
+
+BASE_CH, SHOULDER_CH, ELBOW_CH, GRIPPER_CH = 0,1,2,5
+
+servos = {
+    BASE_CH: servo.Servo(pca.channels[BASE_CH]),
+    SHOULDER_CH: servo.Servo(pca.channels[SHOULDER_CH]),
+    ELBOW_CH: servo.Servo(pca.channels[ELBOW_CH]),
+    GRIPPER_CH: servo.Servo(pca.channels[GRIPPER_CH]),
 }
 
-HOME = (135, 5, 60)
-current_pose = HOME
+# ==========================================
+# 🎥 CAMERA (LOW LAG)
+# ==========================================
+cap = cv2.VideoCapture(0)
+cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+cap.set(3, 160)
+cap.set(4, 120)
+cap.set(cv2.CAP_PROP_FPS, 30)
 
-# ================= GRIPPER =================
-GRIP_CLOSE_SEQ = [100, 90, 75, 60, 45, 30, 15]
-GRIP_OPEN_SEQ = [30, 45, 60, 75, 90, 100]
+# ==========================================
+# 🧠 MODEL (TFLITE)
+# ==========================================
+interpreter = Interpreter(model_path="best_float16.tflite")
+interpreter.allocate_tensors()
 
+inp = interpreter.get_input_details()
+out = interpreter.get_output_details()
 
-# ================= SERIAL COMMANDS =================
-def send_base(a):
-    ser.write(f"B,{a}\n".encode())
+input_h = inp[0]['shape'][1]
+input_w = inp[0]['shape'][2]
 
+CONF = 0.7
+RIPE_ID = 2
 
-def send_pose(s, e, p):
-    ser.write(f"A,{s},{e},{p}\n".encode())
-
-
-def send_grip(g):
-    ser.write(f"G,{g}\n".encode())
-    print("Gripper:", g)
-
-
-# ================= SLOW SMOOTH MOVE =================
-def smooth_move(start, end, steps=8, delay=0.08):
-    s1, e1, p1 = start
-    s2, e2, p2 = end
-
-    for i in range(steps + 1):
-        s = int(s1 + (s2 - s1) * i / steps)
-        e = int(e1 + (e2 - e1) * i / steps)
-        p = int(p1 + (p2 - p1) * i / steps)
-
-        send_pose(s, e, p)
+# ==========================================
+# ⚙️ FUNCTIONS
+# ==========================================
+def move_smooth(ch, target, delay=0.01):
+    current = servos[ch].angle or target
+    step = 1 if target > current else -1
+    for angle in range(int(current), int(target), step):
+        servos[ch].angle = angle
         time.sleep(delay)
 
+def gripper_close():
+    for a in [100,90,75,60,45,30,15]:
+        servos[GRIPPER_CH].angle = a
+        time.sleep(0.3)
 
-# ================= SMART PICK HEIGHT =================
-def get_smart_pick_pose(dist, cy, frame_h):
-    if dist > 25:
-        s, e, p = POSES["FAR"]
-    elif dist > 18:
-        s, e, p = POSES["MID"]
-    else:
-        s, e, p = POSES["CLOSE"]
+def gripper_open():
+    for a in [15,30,45,60,75,90,100]:
+        servos[GRIPPER_CH].angle = a
+        time.sleep(0.3)
 
-    img_center = frame_h // 2
-    y_error = cy - img_center
-
-    shoulder_offset = int(y_error * 0.05)
-    s = s - shoulder_offset
-
-    # safe upward correction
-    s += 5
-    s = max(95, min(150, s))
-
-    return (s, e, p)
-
-
-# ================= ULTRASONIC =================
 def get_distance():
-    if ser.in_waiting:
-        try:
-            return float(ser.readline().decode().strip())
-        except:
-            return None
-    return None
+    vals = []
+    for _ in range(5):
+        d = sensor.distance * 100
+        if 2 < d < 200:
+            vals.append(d)
+        time.sleep(0.05)
+    return sum(vals)/len(vals) if vals else 25
 
+# ==========================================
+# 🎯 VISUAL SERVO
+# ==========================================
+def visual_servo(X, Y):
+    Kx = 0.05
+    Ky = 0.05
 
-# ================= CAMERA =================
-cap = cv2.VideoCapture(1)
+    base = servos[BASE_CH].angle or 20
+    shoulder = servos[SHOULDER_CH].angle or 160
 
-if not cap.isOpened():
-    print("Camera failed ❌")
-    exit()
+    base += -X * Kx
+    shoulder += -Y * Ky
 
+    base = max(BASE_MIN, min(BASE_MAX, base))
+    shoulder = max(SH_MIN, min(SH_MAX, shoulder))
+
+    servos[BASE_CH].angle = base
+    servos[SHOULDER_CH].angle = shoulder
+
+# ==========================================
+# 🤖 IK
+# ==========================================
+def inverse_kinematics(Z):
+    r = Z
+    h = BASE_HEIGHT
+
+    D = (r**2 + h**2 - L1**2 - L2**2)/(2*L1*L2)
+    if abs(D) > 1:
+        return None
+
+    theta2 = math.acos(D)
+    theta1 = math.atan2(h, r) - math.atan2(
+        L2 * math.sin(theta2),
+        L1 + L2 * math.cos(theta2)
+    )
+
+    shoulder = math.degrees(theta1)
+    elbow = math.degrees(theta2)
+
+    return shoulder, elbow
+
+# ==========================================
+# 🏠 HOME
+# ==========================================
+def go_home():
+    move_smooth(BASE_CH, 20)
+    move_smooth(SHOULDER_CH, 160)
+    move_smooth(ELBOW_CH, 20)
+    servos[GRIPPER_CH].angle = 100
+
+go_home()
+time.sleep(2)
+
+# ==========================================
+# 🔁 LOOP CONTROL
+# ==========================================
+frame_count = 0
+locked_frames = 0
+movement_enabled = False
+Z = 25
+
+# ==========================================
+# 🔁 MAIN LOOP
+# ==========================================
 while True:
     ret, frame = cap.read()
     if not ret:
         break
 
-    results = model(frame, conf=0.4, classes=[2])
-    r = results[0]
-    frame = r.plot()
+    frame_count += 1
 
-    if r.boxes is not None and len(r.boxes) > 0:
-        boxes = r.boxes.xyxy.cpu().numpy()
-        confs = r.boxes.conf.cpu().numpy()
+    if frame_count % 3 != 0:
+        cv2.imshow("Tomato Bot", frame)
+        if cv2.waitKey(1) == 27:
+            break
+        continue
 
-        best_idx = confs.argmax()
-        x1, y1, x2, y2 = boxes[best_idx]
+    h_img, w_img = frame.shape[:2]
+    cx0, cy0 = w_img//2, h_img//2
 
-        cx = int((x1 + x2) / 2)
-        cy = int((y1 + y2) / 2)
+    cv2.line(frame, (cx0, 0), (cx0, h_img), (255,0,0), 1)
+    cv2.line(frame, (0, cy0), (w_img, cy0), (255,0,0), 1)
 
-        error = cx - FRAME_CENTER
+    if frame_count % 6 != 0:
+        cv2.imshow("Tomato Bot", frame)
+        if cv2.waitKey(1) == 27:
+            break
+        continue
 
-        # ================= CENTER BASE =================
-        if abs(error) > 30:
-            base_angle -= int(error * 0.02)
-            base_angle = max(BASE_MIN, min(BASE_MAX, base_angle))
-            send_base(base_angle)
-            time.sleep(0.05)
+    # ================= TFLITE INFERENCE =================
+    img = cv2.resize(frame, (input_w, input_h))
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    img = img.astype(np.float32)/255.0
+    img = np.expand_dims(img, axis=0)
 
+    interpreter.set_tensor(inp[0]['index'], img)
+    interpreter.invoke()
+
+    output = interpreter.get_tensor(out[0]['index'])[0].T
+
+    best_conf = 0
+    best_cx, best_cy = None, None
+
+    for pred in output:
+        x, y, w, h = pred[:4]
+        scores = pred[4:]
+
+        cid = np.argmax(scores)
+        conf = scores[cid]
+
+        if conf > CONF and cid == RIPE_ID:
+            if conf > best_conf:
+                best_conf = conf
+                best_cx = int(x * w_img)
+                best_cy = int(y * h_img)
+
+    # ================= USE BEST DETECTION =================
+    if best_cx is not None:
+
+        cx, cy = best_cx, best_cy
+
+        cv2.circle(frame,(cx,cy),5,(0,0,255),-1)
+
+        X = cx - cx0
+        Y = cy0 - cy
+
+        if frame_count % 10 == 0:
+            Z = get_distance()
+
+        cv2.putText(frame,f"X:{X} Y:{Y} Z:{Z:.1f}",
+                    (cx+10,cy),
+                    cv2.FONT_HERSHEY_SIMPLEX,0.5,(0,255,255),2)
+
+        if abs(X) < 100 and abs(Y) < 100:
+            locked_frames += 1
         else:
-            print("CENTERED ✅")
-            centered = True
-            time.sleep(0.2)
+            locked_frames = 0
 
-        # ================= PICK =================
-        if centered:
-            dist = get_distance()
+        if locked_frames > 5:
+            movement_enabled = True
 
-            if dist is not None:
-                target = get_smart_pick_pose(
-                    dist, cy, frame.shape[0]
-                )
+        if movement_enabled:
 
-                # smooth slow pick motion
-                smooth_move(current_pose, target, steps=8, delay=0.08)
+            if abs(X) > 20 or abs(Y) > 20:
+                visual_servo(X, Y)
 
-                # slow gripper close
-                for g in GRIP_CLOSE_SEQ:
-                    send_grip(g)
-                    time.sleep(0.2)
+            else:
+                print("✅ LOCKED & PICKING")
 
-                print("GRIPPED 🍅")
+                target_Z = Z - 5
+                ik = inverse_kinematics(target_Z)
 
-                # slow tiny detach bend
-                detach = (
-                    max(95, target[0] - 2),
-                    target[1],
-                    target[2]
-                )
+                if ik:
+                    sh, el = ik
 
-                smooth_move(target, detach, steps=6, delay=0.1)
+                    sh = SHOULDER_OFFSET + SHOULDER_DIR * sh
+                    el = ELBOW_OFFSET + ELBOW_DIR * el
 
-                # slow smooth rise home
-                smooth_move(detach, HOME, steps=10, delay=0.08)
+                    sh = max(SH_MIN, min(SH_MAX, sh))
+                    el = max(EL_MIN, min(EL_MAX, el))
 
-                # slow base return home
-                if base_angle > BASE_HOME:
-                    for angle in range(base_angle, BASE_HOME, -2):
-                        send_base(angle)
-                        time.sleep(0.08)
-                else:
-                    for angle in range(base_angle, BASE_HOME, 2):
-                        send_base(angle)
-                        time.sleep(0.08)
+                    move_smooth(SHOULDER_CH, sh)
+                    move_smooth(ELBOW_CH, el)
 
-                base_angle = BASE_HOME
+                    gripper_close()
+                    time.sleep(1)
 
-                # slow drop
-                for g in GRIP_OPEN_SEQ:
-                    send_grip(g)
-                    time.sleep(0.2)
+                    go_home()
+                    gripper_open()
 
-                print("DROPPED IN CART ✅")
+                    movement_enabled = False
+                    locked_frames = 0
+                    time.sleep(2)
 
-                centered = False
-                time.sleep(1)
+    cv2.imshow("Tomato Bot", frame)
 
-    else:
-        # ================= SCAN =================
-        base_angle += scan_dir * 2
-
-        if base_angle >= BASE_MAX or base_angle <= BASE_MIN:
-            scan_dir *= -1
-
-        base_angle = max(BASE_MIN, min(BASE_MAX, base_angle))
-        send_base(base_angle)
-        time.sleep(0.08)
-
-    cv2.imshow("Tomato Robot FINAL SLOW", frame)
-
-    if cv2.waitKey(1) & 0xFF == ord('q'):
+    if cv2.waitKey(1) == 27:
         break
 
 cap.release()
