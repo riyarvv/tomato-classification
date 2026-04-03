@@ -3,12 +3,16 @@ import serial
 import time
 import numpy as np
 from tflite_runtime.interpreter import Interpreter
+from flask import Flask, Response
+
+# ================= FLASK =================
+app = Flask(__name__)
 
 # ================= SERIAL =================
 ser = serial.Serial('/dev/ttyUSB0', 9600, timeout=1)
 time.sleep(2)
 
-# ================= MODEL (TFLITE) =================
+# ================= MODEL =================
 interpreter = Interpreter(model_path="best_float16.tflite")
 interpreter.allocate_tensors()
 
@@ -44,7 +48,7 @@ GRIP_OPEN_SEQ = [30, 45, 60, 75, 90, 100]
 CONF = 0.4
 RIPE_CLASS_ID = 2
 
-# ================= SERIAL COMMANDS =================
+# ================= SERIAL =================
 def send_base(a):
     ser.write(f"B,{a}\n".encode())
 
@@ -53,9 +57,8 @@ def send_pose(s, e, p):
 
 def send_grip(g):
     ser.write(f"G,{g}\n".encode())
-    print("Gripper:", g)
 
-# ================= SLOW SMOOTH MOVE =================
+# ================= MOTION =================
 def smooth_move(start, end, steps=8, delay=0.08):
     s1, e1, p1 = start
     s2, e2, p2 = end
@@ -64,11 +67,10 @@ def smooth_move(start, end, steps=8, delay=0.08):
         s = int(s1 + (s2 - s1) * i / steps)
         e = int(e1 + (e2 - e1) * i / steps)
         p = int(p1 + (p2 - p1) * i / steps)
-
         send_pose(s, e, p)
         time.sleep(delay)
 
-# ================= SMART PICK HEIGHT =================
+# ================= SMART PICK =================
 def get_smart_pick_pose(dist, cy, frame_h):
     if dist > 25:
         s, e, p = POSES["FAR"]
@@ -80,15 +82,13 @@ def get_smart_pick_pose(dist, cy, frame_h):
     img_center = frame_h // 2
     y_error = cy - img_center
 
-    shoulder_offset = int(y_error * 0.05)
-    s = s - shoulder_offset
-
+    s -= int(y_error * 0.05)
     s += 5
     s = max(95, min(150, s))
 
     return (s, e, p)
 
-# ================= ULTRASONIC =================
+# ================= DISTANCE =================
 def get_distance():
     if ser.in_waiting:
         try:
@@ -100,142 +100,107 @@ def get_distance():
 # ================= CAMERA =================
 cap = cv2.VideoCapture(0)
 
-if not cap.isOpened():
-    print("Camera failed ❌")
-    exit()
+# ================= STREAM FUNCTION =================
+def generate_frames():
+    global base_angle, scan_dir, centered, current_pose
 
-while True:
-    ret, frame = cap.read()
-    if not ret:
-        break
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            continue
 
-    orig_h, orig_w = frame.shape[:2]
+        orig_h, orig_w = frame.shape[:2]
 
-    # ================= TFLITE INFERENCE =================
-    img = cv2.resize(frame, (input_w, input_h))
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    img = img.astype(np.float32) / 255.0
-    img = np.expand_dims(img, axis=0)
+        # -------- TFLITE --------
+        img = cv2.resize(frame, (input_w, input_h))
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img = img.astype(np.float32) / 255.0
+        img = np.expand_dims(img, axis=0)
 
-    interpreter.set_tensor(input_details[0]['index'], img)
-    interpreter.invoke()
+        interpreter.set_tensor(input_details[0]['index'], img)
+        interpreter.invoke()
 
-    output = interpreter.get_tensor(output_details[0]['index'])[0]
-    output = output.T
+        output = interpreter.get_tensor(output_details[0]['index'])[0].T
 
-    found = False
+        boxes, scores, centers = [], [], []
 
-    boxes = []
-    scores = []
-    centers = []
+        for pred in output:
+            x, y, w, h = pred[:4]
+            class_scores = pred[4:]
 
-    for pred in output:
-        x, y, w, h = pred[:4]
-        class_scores = pred[4:]
+            class_id = int(np.argmax(class_scores))
+            confidence = class_scores[class_id]
 
-        class_id = int(np.argmax(class_scores))
-        confidence = class_scores[class_id]
+            if confidence > CONF and class_id == RIPE_CLASS_ID:
+                cx = int(x * orig_w)
+                cy = int(y * orig_h)
 
-        if confidence > CONF and class_id == RIPE_CLASS_ID:
-            cx = int(x * orig_w)
-            cy = int(y * orig_h)
+                xmin = int((x - w/2) * orig_w)
+                ymin = int((y - h/2) * orig_h)
+                xmax = int((x + w/2) * orig_w)
+                ymax = int((y + h/2) * orig_h)
 
-            xmin = int((x - w/2) * orig_w)
-            ymin = int((y - h/2) * orig_h)
-            xmax = int((x + w/2) * orig_w)
-            ymax = int((y + h/2) * orig_h)
+                boxes.append((xmin, ymin, xmax, ymax))
+                scores.append(confidence)
+                centers.append((cx, cy))
 
-            boxes.append((xmin, ymin, xmax, ymax))
-            scores.append(confidence)
-            centers.append((cx, cy))
+        if len(boxes) > 0:
+            best_idx = int(np.argmax(scores))
+            x1, y1, x2, y2 = boxes[best_idx]
+            cx, cy = centers[best_idx]
 
-    if len(boxes) > 0:
-        best_idx = int(np.argmax(scores))
-        x1, y1, x2, y2 = boxes[best_idx]
-        cx, cy = centers[best_idx]
+            cv2.rectangle(frame, (x1,y1), (x2,y2), (0,255,0), 2)
+            cv2.circle(frame, (cx,cy), 5, (0,255,0), -1)
 
-        cv2.rectangle(frame, (x1,y1), (x2,y2), (0,255,0), 2)
-        cv2.circle(frame, (cx,cy), 5, (0,255,0), -1)
+            error = cx - FRAME_CENTER
 
-        error = cx - FRAME_CENTER
+            if abs(error) > 30:
+                base_angle -= int(error * 0.02)
+                base_angle = max(BASE_MIN, min(BASE_MAX, base_angle))
+                send_base(base_angle)
+            else:
+                centered = True
 
-        # ================= CENTER BASE =================
-        if abs(error) > 30:
-            base_angle -= int(error * 0.02)
-            base_angle = max(BASE_MIN, min(BASE_MAX, base_angle))
-            send_base(base_angle)
-            time.sleep(0.05)
+            if centered:
+                dist = get_distance()
+
+                if dist is not None:
+                    target = get_smart_pick_pose(dist, cy, frame.shape[0])
+                    smooth_move(current_pose, target)
+
+                    for g in GRIP_CLOSE_SEQ:
+                        send_grip(g)
+                        time.sleep(0.2)
+
+                    detach = (max(95, target[0]-2), target[1], target[2])
+                    smooth_move(target, detach)
+                    smooth_move(detach, HOME)
+
+                    for g in GRIP_OPEN_SEQ:
+                        send_grip(g)
+                        time.sleep(0.2)
+
+                    centered = False
 
         else:
-            print("CENTERED ✅")
-            centered = True
-            time.sleep(0.2)
+            base_angle += scan_dir * 2
+            if base_angle >= BASE_MAX or base_angle <= BASE_MIN:
+                scan_dir *= -1
+            send_base(base_angle)
 
-        # ================= PICK =================
-        if centered:
-            dist = get_distance()
+        # -------- STREAM ENCODE --------
+        _, buffer = cv2.imencode('.jpg', frame)
+        frame_bytes = buffer.tobytes()
 
-            if dist is not None:
-                target = get_smart_pick_pose(
-                    dist, cy, frame.shape[0]
-                )
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
 
-                smooth_move(current_pose, target)
+# ================= ROUTE =================
+@app.route('/video_feed')
+def video_feed():
+    return Response(generate_frames(),
+                    mimetype='multipart/x-mixed-replace; boundary=frame')
 
-                for g in GRIP_CLOSE_SEQ:
-                    send_grip(g)
-                    time.sleep(0.2)
-
-                print("GRIPPED 🍅")
-
-                detach = (
-                    max(95, target[0] - 2),
-                    target[1],
-                    target[2]
-                )
-
-                smooth_move(target, detach)
-
-                smooth_move(detach, HOME)
-
-                # base return
-                if base_angle > BASE_HOME:
-                    for angle in range(base_angle, BASE_HOME, -2):
-                        send_base(angle)
-                        time.sleep(0.08)
-                else:
-                    for angle in range(base_angle, BASE_HOME, 2):
-                        send_base(angle)
-                        time.sleep(0.08)
-
-                base_angle = BASE_HOME
-
-                for g in GRIP_OPEN_SEQ:
-                    send_grip(g)
-                    time.sleep(0.2)
-
-                print("DROPPED IN CART ✅")
-
-                centered = False
-                time.sleep(1)
-
-        found = True
-
-    else:
-        # ================= SCAN =================
-        base_angle += scan_dir * 2
-
-        if base_angle >= BASE_MAX or base_angle <= BASE_MIN:
-            scan_dir *= -1
-
-        base_angle = max(BASE_MIN, min(BASE_MAX, base_angle))
-        send_base(base_angle)
-        time.sleep(0.08)
-
-    cv2.imshow("Tomato Robot FINAL SLOW", frame)
-
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
-
-cap.release()
-cv2.destroyAllWindows()
+# ================= RUN =================
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
