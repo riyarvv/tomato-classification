@@ -125,6 +125,17 @@ def video_feed():
 def get_count():
     return jsonify({"count": tomato_count})
 
+@app.route("/increment")
+def increment():
+    global tomato_count
+
+    tomato_count += 1
+    esp.write(f"COUNT:{tomato_count}\n".encode())
+
+    print("🍅 Tomato Count:", tomato_count)
+
+    return {"count": tomato_count}
+
 @app.route("/reset")
 def reset():
     global tomato_count
