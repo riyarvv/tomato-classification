@@ -213,6 +213,131 @@ def generate_frames():
                b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
 
 # ================= ROUTES =================
+@app.route("/control")
+def control():
+
+    return """
+<html>
+
+<head>
+<title>Agribot Controller</title>
+
+<style>
+body{
+font-family:Arial;
+text-align:center;
+background:#f4f4f4;
+}
+
+button{
+width:140px;
+height:70px;
+font-size:18px;
+margin:10px;
+border-radius:10px;
+border:none;
+background:#4CAF50;
+color:white;
+}
+
+button:hover{
+background:#45a049;
+}
+
+.video{
+border:5px solid black;
+margin-top:20px;
+}
+
+.countbox{
+font-size:28px;
+margin-top:20px;
+color:#333;
+}
+</style>
+
+</head>
+
+<body>
+
+<h1>🤖 Agribot Controller</h1>
+
+<h2>Live Camera</h2>
+
+<img src="/video_feed" width="480" class="video">
+
+<br><br>
+
+<h2>Robot Movement</h2>
+
+<button onclick="send('F')">⬆ Forward</button><br>
+
+<button onclick="send('L')">⬅ Left</button>
+<button onclick="send('S')">Stop</button>
+<button onclick="send('R')">➡ Right</button><br>
+
+<button onclick="send('B')">⬇ Back</button>
+
+<br><br>
+
+<h2>Motor Speed</h2>
+
+<input type="range" min="0" max="255" value="180"
+onchange="speed(this.value)">
+
+<br><br>
+
+<h2>Harvesting Control</h2>
+
+<button onclick="startHarvest()">Start Harvest</button>
+<button onclick="stopHarvest()">Stop Harvest</button>
+
+<div class="countbox">
+🍅 Tomato Count: <span id="count">0</span>
+</div>
+
+<br>
+
+<button onclick="resetCount()">Reset Count</button>
+
+<script>
+
+function send(cmd){
+fetch('/move/' + cmd)
+}
+
+function speed(val){
+fetch('/speed/' + val)
+}
+
+function startHarvest(){
+fetch('/pick')
+}
+
+function stopHarvest(){
+fetch('/stop_harvest')
+}
+
+function resetCount(){
+fetch('/reset')
+}
+
+function updateCount(){
+fetch('/count')
+.then(res => res.json())
+.then(data => {
+document.getElementById("count").innerText = data.count
+})
+}
+
+setInterval(updateCount,1000)
+
+</script>
+
+</body>
+</html>
+"""
+
 @app.route('/video_feed')
 def video_feed():
     return Response(generate_frames(),
