@@ -9,7 +9,7 @@ from tflite_runtime.interpreter import Interpreter
 app = Flask(__name__)
 
 # ================= SERIAL =================
-ser = serial.Serial('/dev/ttyACM0', 115200, timeout=1)
+ser = serial.Serial('/dev/ttyUSB0', 115200, timeout=1)
 
 # ================= GLOBAL =================
 harvesting = False
