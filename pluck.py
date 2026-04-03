@@ -1,28 +1,37 @@
-import cv2
+from flask import Flask, Response, redirect, jsonify
 import serial
+import threading
+import cv2
 import time
 import numpy as np
 from tflite_runtime.interpreter import Interpreter
-from flask import Flask, Response
 
-# ================= FLASK =================
 app = Flask(__name__)
 
 # ================= SERIAL =================
-ser = serial.Serial('/dev/ttyUSB0', 9600, timeout=1)
-time.sleep(2)
+ser = serial.Serial('/dev/ttyACM0', 115200, timeout=1)
+
+# ================= GLOBAL =================
+harvesting = False
+tomato_count = 0
 
 # ================= MODEL =================
 interpreter = Interpreter(model_path="best_float16.tflite")
 interpreter.allocate_tensors()
 
-input_details = interpreter.get_input_details()
-output_details = interpreter.get_output_details()
+inp = interpreter.get_input_details()
+out = interpreter.get_output_details()
 
-input_h = input_details[0]['shape'][1]
-input_w = input_details[0]['shape'][2]
+input_h = inp[0]['shape'][1]
+input_w = inp[0]['shape'][2]
 
-# ================= BASE SETTINGS =================
+CONF = 0.4
+RIPE_ID = 2
+
+# ================= CAMERA =================
+cap = cv2.VideoCapture(0)
+
+# ================= ROBOT SETTINGS =================
 BASE_MIN, BASE_MAX = 5, 160
 FRAME_CENTER = 305
 BASE_HOME = 20
@@ -31,7 +40,6 @@ base_angle = BASE_HOME
 scan_dir = 1
 centered = False
 
-# ================= ARM POSES =================
 POSES = {
     "FAR": (110, 15, 70),
     "MID": (125, 10, 65),
@@ -41,14 +49,10 @@ POSES = {
 HOME = (135, 5, 60)
 current_pose = HOME
 
-# ================= GRIPPER =================
 GRIP_CLOSE_SEQ = [100, 90, 75, 60, 45, 30, 15]
 GRIP_OPEN_SEQ = [30, 45, 60, 75, 90, 100]
 
-CONF = 0.4
-RIPE_CLASS_ID = 2
-
-# ================= SERIAL =================
+# ================= SERIAL FUNCTIONS =================
 def send_base(a):
     ser.write(f"B,{a}\n".encode())
 
@@ -58,7 +62,19 @@ def send_pose(s, e, p):
 def send_grip(g):
     ser.write(f"G,{g}\n".encode())
 
-# ================= MOTION =================
+# ================= SERIAL LISTENER =================
+def read_serial():
+    global tomato_count
+
+    while True:
+        if ser.in_waiting:
+            line = ser.readline().decode().strip()
+
+            if line.startswith("COUNT:"):
+                tomato_count = int(line.split(":")[1])
+                print("Updated Count:", tomato_count)
+
+# ================= PICK HELPERS =================
 def smooth_move(start, end, steps=8, delay=0.08):
     s1, e1, p1 = start
     s2, e2, p2 = end
@@ -67,10 +83,18 @@ def smooth_move(start, end, steps=8, delay=0.08):
         s = int(s1 + (s2 - s1) * i / steps)
         e = int(e1 + (e2 - e1) * i / steps)
         p = int(p1 + (p2 - p1) * i / steps)
+
         send_pose(s, e, p)
         time.sleep(delay)
 
-# ================= SMART PICK =================
+def get_distance():
+    if ser.in_waiting:
+        try:
+            return float(ser.readline().decode().strip())
+        except:
+            return None
+    return None
+
 def get_smart_pick_pose(dist, cy, frame_h):
     if dist > 25:
         s, e, p = POSES["FAR"]
@@ -88,28 +112,16 @@ def get_smart_pick_pose(dist, cy, frame_h):
 
     return (s, e, p)
 
-# ================= DISTANCE =================
-def get_distance():
-    if ser.in_waiting:
-        try:
-            return float(ser.readline().decode().strip())
-        except:
-            return None
-    return None
-
-# ================= CAMERA =================
-cap = cv2.VideoCapture(0)
-
-# ================= STREAM FUNCTION =================
+# ================= VIDEO STREAM =================
 def generate_frames():
-    global base_angle, scan_dir, centered, current_pose
+    global base_angle, scan_dir, centered, current_pose, harvesting
 
     while True:
         ret, frame = cap.read()
         if not ret:
             continue
 
-        orig_h, orig_w = frame.shape[:2]
+        h, w = frame.shape[:2]
 
         # -------- TFLITE --------
         img = cv2.resize(frame, (input_w, input_h))
@@ -117,40 +129,40 @@ def generate_frames():
         img = img.astype(np.float32) / 255.0
         img = np.expand_dims(img, axis=0)
 
-        interpreter.set_tensor(input_details[0]['index'], img)
+        interpreter.set_tensor(inp[0]['index'], img)
         interpreter.invoke()
 
-        output = interpreter.get_tensor(output_details[0]['index'])[0].T
+        output = interpreter.get_tensor(out[0]['index'])[0].T
 
         boxes, scores, centers = [], [], []
 
         for pred in output:
-            x, y, w, h = pred[:4]
-            class_scores = pred[4:]
+            x, y, bw, bh = pred[:4]
+            scores_arr = pred[4:]
 
-            class_id = int(np.argmax(class_scores))
-            confidence = class_scores[class_id]
+            cid = int(np.argmax(scores_arr))
+            conf = scores_arr[cid]
 
-            if confidence > CONF and class_id == RIPE_CLASS_ID:
-                cx = int(x * orig_w)
-                cy = int(y * orig_h)
+            if conf > CONF and cid == RIPE_ID:
+                cx = int(x * w)
+                cy = int(y * h)
 
-                xmin = int((x - w/2) * orig_w)
-                ymin = int((y - h/2) * orig_h)
-                xmax = int((x + w/2) * orig_w)
-                ymax = int((y + h/2) * orig_h)
+                xmin = int((x - bw/2) * w)
+                ymin = int((y - bh/2) * h)
+                xmax = int((x + bw/2) * w)
+                ymax = int((y + bh/2) * h)
 
                 boxes.append((xmin, ymin, xmax, ymax))
-                scores.append(confidence)
+                scores.append(conf)
                 centers.append((cx, cy))
 
         if len(boxes) > 0:
-            best_idx = int(np.argmax(scores))
-            x1, y1, x2, y2 = boxes[best_idx]
-            cx, cy = centers[best_idx]
+            best = int(np.argmax(scores))
+            x1, y1, x2, y2 = boxes[best]
+            cx, cy = centers[best]
 
-            cv2.rectangle(frame, (x1,y1), (x2,y2), (0,255,0), 2)
-            cv2.circle(frame, (cx,cy), 5, (0,255,0), -1)
+            cv2.rectangle(frame, (x1,y1),(x2,y2),(0,255,0),2)
+            cv2.circle(frame, (cx,cy),5,(0,255,0),-1)
 
             error = cx - FRAME_CENTER
 
@@ -161,20 +173,19 @@ def generate_frames():
             else:
                 centered = True
 
-            if centered:
+            if centered and harvesting:
                 dist = get_distance()
 
-                if dist is not None:
-                    target = get_smart_pick_pose(dist, cy, frame.shape[0])
+                if dist:
+                    target = get_smart_pick_pose(dist, cy, h)
+
                     smooth_move(current_pose, target)
 
                     for g in GRIP_CLOSE_SEQ:
                         send_grip(g)
                         time.sleep(0.2)
 
-                    detach = (max(95, target[0]-2), target[1], target[2])
-                    smooth_move(target, detach)
-                    smooth_move(detach, HOME)
+                    smooth_move(target, HOME)
 
                     for g in GRIP_OPEN_SEQ:
                         send_grip(g)
@@ -182,25 +193,52 @@ def generate_frames():
 
                     centered = False
 
+                    # update count
+                    global tomato_count
+                    tomato_count += 1
+                    ser.write(f"COUNT:{tomato_count}\n".encode())
+
         else:
             base_angle += scan_dir * 2
             if base_angle >= BASE_MAX or base_angle <= BASE_MIN:
                 scan_dir *= -1
+
             send_base(base_angle)
 
-        # -------- STREAM ENCODE --------
+        # -------- STREAM --------
         _, buffer = cv2.imencode('.jpg', frame)
         frame_bytes = buffer.tobytes()
 
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
 
-# ================= ROUTE =================
+# ================= ROUTES =================
 @app.route('/video_feed')
 def video_feed():
     return Response(generate_frames(),
-                    mimetype='multipart/x-mixed-replace; boundary=frame')
+        mimetype='multipart/x-mixed-replace; boundary=frame')
 
-# ================= RUN =================
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+@app.route('/pick')
+def pick():
+    global harvesting
+    harvesting = True
+    return "Harvesting Started"
+
+@app.route('/stop_harvest')
+def stop():
+    global harvesting
+    harvesting = False
+    return "Harvesting Stopped"
+
+@app.route('/count')
+def get_count():
+    return jsonify({"count": tomato_count})
+
+# ================= MAIN =================
+if __name__ == "__main__":
+
+    threading.Thread(target=read_serial, daemon=True).start()
+
+    print("🚀 Agribot Server Running")
+
+    app.run(host="0.0.0.0", port=5000, threaded=True)
