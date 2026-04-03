@@ -141,7 +141,7 @@ def pick():
 
     if scan_process is None:
         scan_process = subprocess.Popen(
-            ["python3", "scan_pick.py"]
+            ["python3", "pluck.py"]
         )
         harvesting = True
         print("🌱 Harvesting started")
