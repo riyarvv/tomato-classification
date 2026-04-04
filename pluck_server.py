@@ -15,7 +15,6 @@ arduino = serial.Serial('/dev/ttyUSB0', 9600, timeout=1)
 # ================================
 # CAMERA INIT (STREAM INSIDE SERVER)
 # ================================
-cap = cv2.VideoCapture(0)
 
 # ================================
 # GLOBAL VARIABLES
@@ -41,20 +40,7 @@ def read_serial():
 # ================================
 # VIDEO STREAM GENERATOR
 # ================================
-def generate_frames():
-    while True:
-        success, frame = cap.read()
-        if not success:
-            break
 
-        # (optional) resize for speed
-        frame = cv2.resize(frame, (480, 320))
-
-        ret, buffer = cv2.imencode('.jpg', frame)
-        frame = buffer.tobytes()
-
-        yield (b'--frame\r\n'
-               b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
 
 # ================================
 # CONTROL PAGE
@@ -135,8 +121,7 @@ setInterval(updateCount,1000)
 # ================================
 @app.route('/video_feed')
 def video_feed():
-    return Response(generate_frames(),
-                    mimetype='multipart/x-mixed-replace; boundary=frame')
+    return redirect("http://10.215.117.125:5002/video_feed")
 
 # ================================
 # COUNT ROUTES
@@ -225,4 +210,4 @@ if __name__ == "__main__":
 
     print("🚀 Server Running at http://<PI-IP>:5001/control")
 
-    app.run(host="0.0.0.0", port=5001, threaded=True)
+    app.run(host="0.0.0.0", port=5001, threaded=True,use_reloader=False)
