@@ -268,7 +268,6 @@ while True:
         send_base(base_angle)
         time.sleep(0.08)
 
-    global latest_frame
     latest_frame = frame.copy()
     cv2.imshow("Tomato Robot FINAL SLOW", frame)
 
