@@ -4,6 +4,11 @@ import time
 import requests
 import numpy as np
 from tflite_runtime.interpreter import Interpreter
+from flask import Flask, Response
+import threading
+
+stream_app = Flask(__name__)
+latest_frame = None
 
 # ================= SERIAL =================
 ser = serial.Serial('/dev/ttyUSB0', 9600, timeout=1)
@@ -100,10 +105,32 @@ def get_distance():
 
 # ================= CAMERA =================
 cap = cv2.VideoCapture(0)
+latest_frame = None
+
+def generate():
+    global latest_frame
+
+    while True:
+        if latest_frame is None:
+            continue
+
+        _, buffer = cv2.imencode('.jpg', latest_frame)
+        frame = buffer.tobytes()
+
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+@stream_app.route('/video_feed')
+def video_feed():
+    return Response(generate(),
+        mimetype='multipart/x-mixed-replace; boundary=frame')
 
 if not cap.isOpened():
     print("Camera failed ❌")
     exit()
+def run_stream():
+    stream_app.run(host='0.0.0.0', port=5002, use_reloader=False)
+
+threading.Thread(target=run_stream, daemon=True).start()
 
 while True:
     ret, frame = cap.read()
@@ -241,6 +268,8 @@ while True:
         send_base(base_angle)
         time.sleep(0.08)
 
+    global latest_frame
+    latest_frame = frame.copy()
     cv2.imshow("Tomato Robot FINAL SLOW", frame)
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
