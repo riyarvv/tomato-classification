@@ -116,7 +116,7 @@ setInterval(updateCount,1000)
 # ================================
 @app.route('/video_feed')
 def video_feed():
-    return redirect("http://raspberrypi.local:5001/video_feed")
+    return redirect("http://raspberrypi.local:5002/video_feed")
 
 # ================================
 # COUNT ROUTES
@@ -203,6 +203,6 @@ def speed(value):
 if __name__ == "__main__":
     threading.Thread(target=read_serial, daemon=True).start()
 
-    print("🚀 Server Running at http://<PI-IP>:5000/control")
+    print("🚀 Server Running at http://<PI-IP>:5001/control")
 
-    app.run(host="0.0.0.0", port=5000, threaded=True)
+    app.run(host="0.0.0.0", port=5001, threaded=True)
