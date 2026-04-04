@@ -156,8 +156,8 @@ while True:
 
     frame_count += 1
 
-    # 🔥 Skip frames for speed
-    if frame_count % 3 != 0:
+    # 🔥 Skip more frames → BIG lag reduction
+    if frame_count % 4 != 0:
         with lock:
             output_frame = frame.copy()
         continue
@@ -176,7 +176,9 @@ while True:
 
     output = interpreter.get_tensor(output_details[0]['index'])[0].T
 
-    boxes, centers = [], []
+    boxes = []
+    scores = []
+    centers = []
 
     for pred in output:
         x, y, w, h = pred[:4]
@@ -186,38 +188,55 @@ while True:
         confidence = class_scores[class_id]
 
         if confidence > CONF and class_id == RIPE_CLASS_ID:
+
             cx = int(x * orig_w)
             cy = int(y * orig_h)
 
             xmin = int((x - w/2) * orig_w)
             ymin = int((y - h/2) * orig_h)
             xmax = int((x + w/2) * orig_w)
-            ymax = int((y + h/2) * orig_h)  # ✅ FIXED
+            ymax = int((y + h/2) * orig_h)
 
-            boxes.append((xmin, ymin, xmax, ymax))
+            boxes.append([xmin, ymin, xmax - xmin, ymax - ymin])
+            scores.append(float(confidence))
             centers.append((cx, cy))
 
-    # ================= DRAW =================
-    for i in range(len(boxes)):
-        x1, y1, x2, y2 = boxes[i]
-        cx, cy = centers[i]
+    # ================= NMS (IMPORTANT) =================
+    indices = cv2.dnn.NMSBoxes(boxes, scores, CONF, 0.45)
 
-        cv2.rectangle(frame, (x1,y1), (x2,y2), (0,255,0), 2)
-        cv2.circle(frame, (cx,cy), 5, (0,255,0), -1)
+    valid_centers = []
 
-    # ================= ROBOT =================
-    if len(centers) > 0:
-        cx, cy = centers[0]
+    if len(indices) > 0:
+        for i in indices.flatten():
+            x, y, w, h = boxes[i]
+            cx, cy = centers[i]
+            conf = scores[i]
+
+            valid_centers.append((cx, cy))
+
+            # ✅ DRAW BOX
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (0,255,0), 2)
+
+            # ✅ LABEL (Ripe + Confidence)
+            label = f"Ripe {conf:.2f}"
+            cv2.putText(frame, label,
+                        (x, y - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6, (0,255,0), 2)
+
+            cv2.circle(frame, (cx, cy), 5, (0,255,0), -1)
+
+    # ================= ROBOT CONTROL =================
+    if len(valid_centers) > 0:
+        cx, cy = valid_centers[0]
         error = cx - FRAME_CENTER
 
         if abs(error) > 30:
             base_angle -= int(error * 0.02)
             base_angle = max(BASE_MIN, min(BASE_MAX, base_angle))
             send_base(base_angle)
-            time.sleep(0.05)
         else:
             centered = True
-            time.sleep(0.2)
 
         if centered:
             dist = get_distance()
@@ -229,32 +248,34 @@ while True:
 
                 for g in GRIP_CLOSE_SEQ:
                     send_grip(g)
-                    time.sleep(0.2)
 
+                    # 🍅 COUNT TRIGGER
                     if g == 30:
                         try:
-                            requests.get("http://localhost:5001/increment")
+                            requests.get("http://localhost:5001/increment", timeout=0.2)
                         except:
                             pass
+
+                    time.sleep(0.15)   # 🔥 reduced delay
 
                 detach = (max(95, target[0]-2), target[1], target[2])
 
                 smooth_move(target, detach)
                 smooth_move(detach, HOME)
 
+                # return base
                 step = -2 if base_angle > BASE_HOME else 2
                 for angle in range(base_angle, BASE_HOME, step):
                     send_base(angle)
-                    time.sleep(0.08)
 
                 base_angle = BASE_HOME
 
                 for g in GRIP_OPEN_SEQ:
                     send_grip(g)
-                    time.sleep(0.2)
+                    time.sleep(0.15)
 
                 centered = False
-                time.sleep(1)
+                time.sleep(0.5)
 
     else:
         base_angle += scan_dir * 2
@@ -264,7 +285,6 @@ while True:
 
         base_angle = max(BASE_MIN, min(BASE_MAX, base_angle))
         send_base(base_angle)
-        time.sleep(0.08)
 
     # ================= STREAM UPDATE =================
     with lock:
