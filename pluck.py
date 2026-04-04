@@ -190,7 +190,7 @@ while True:
                   # 🍅 COUNT TRIGGER
                   if g == 30:
                       try:
-                          requests.get("http://localhost:5001/increment")
+                          requests.get("http://10.215.117.125:5001/increment")
                           print("🍅 Count increment sent")
                       except:
                           print("⚠️ Server not reachable")
