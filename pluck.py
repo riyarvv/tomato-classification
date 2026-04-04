@@ -35,7 +35,7 @@ POSES = {
     "CLOSE": (140, 6, 60)
 }
 
-HOME = (135, 5, 60)
+HOME = (155, 5, 60)
 current_pose = HOME
 
 # ================= GRIPPER =================
