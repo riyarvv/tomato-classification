@@ -13,6 +13,12 @@ dictionary = aruco.getPredefinedDictionary(aruco.DICT_4X4_50)
 # ================= CAMERA =================
 cap = cv2.VideoCapture(0)
 
+if not cap.isOpened():
+    print("❌ Camera not opened")
+    exit()
+else:
+    print("✅ Camera opened")
+
 TURN_THRESHOLD = 50
 STOP_AREA = 12000
 
