@@ -8,7 +8,9 @@ from flask import Flask, Response
 import threading
 
 stream_app = Flask(__name__)
-latest_frame = None
+
+latest_frame = None      # processed frame (for display if needed)
+raw_frame = None         # 🔥 NEW (fast camera buffer)
 frame_lock = threading.Lock()
 
 # ================= SERIAL =================
@@ -59,7 +61,6 @@ def send_pose(s, e, p):
 
 def send_grip(g):
     ser.write(f"G,{g}\n".encode())
-    print("Gripper:", g)
 
 # ================= SMOOTH MOVE =================
 def smooth_move(start, end, steps=8, delay=0.08):
@@ -111,17 +112,26 @@ if not cap.isOpened():
     print("Camera failed ❌")
     exit()
 
+# 🔥 CAMERA THREAD (FAST)
+def camera_thread():
+    global raw_frame
+    while True:
+        ret, frame = cap.read()
+        if ret:
+            raw_frame = frame
+
+threading.Thread(target=camera_thread, daemon=True).start()
+
 # ================= STREAM =================
 def generate():
-    global latest_frame
+    global raw_frame
 
     while True:
-        if latest_frame is None:
-            time.sleep(0.01)   # ✅ FIX CPU
+        if raw_frame is None:
+            time.sleep(0.01)
             continue
 
-        with frame_lock:
-            frame_copy = latest_frame.copy()
+        frame_copy = raw_frame.copy()   # 🔥 FAST STREAM
 
         _, buffer = cv2.imencode('.jpg', frame_copy)
         frame = buffer.tobytes()
@@ -141,12 +151,13 @@ threading.Thread(target=run_stream, daemon=True).start()
 
 # ================= MAIN LOOP =================
 while True:
-    ret, frame = cap.read()
-    if not ret:
-        break
+    if raw_frame is None:
+        continue
+
+    frame = raw_frame.copy()
 
     orig_h, orig_w = frame.shape[:2]
-    FRAME_CENTER = orig_w // 2   # ✅ FIXED
+    FRAME_CENTER = orig_w // 2
 
     # ================= INFERENCE =================
     img = cv2.resize(frame, (input_w, input_h))
@@ -215,7 +226,7 @@ while True:
 
                     if g == 30:
                         try:
-                            requests.get("http://localhost:5001/increment")  # ✅ FIXED IP
+                            requests.get("http://localhost:5001/increment")
                         except:
                             pass
 
@@ -224,7 +235,6 @@ while True:
                 smooth_move(target, detach)
                 smooth_move(detach, HOME)
 
-                # return base
                 step = -2 if base_angle > BASE_HOME else 2
                 for angle in range(base_angle, BASE_HOME, step):
                     send_base(angle)
@@ -249,7 +259,6 @@ while True:
         send_base(base_angle)
         time.sleep(0.08)
 
-    # ✅ THREAD SAFE FRAME UPDATE
     with frame_lock:
         latest_frame = frame.copy()
 
