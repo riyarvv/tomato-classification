@@ -20,7 +20,7 @@ else:
     print("✅ Camera opened")
 
 TURN_THRESHOLD = 50
-STOP_AREA = 12000
+STOP_AREA = 40000
 
 last_command = ""
 
