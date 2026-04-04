@@ -116,7 +116,7 @@ setInterval(updateCount,1000)
 # ================================
 @app.route('/video_feed')
 def video_feed():
-    return redirect("http://raspberrypi.local:5002/video_feed")
+    return redirect("http://10.215.117.125:5002/video_feed")
 
 # ================================
 # COUNT ROUTES
