@@ -2,24 +2,15 @@ import cv2
 import serial
 import time
 
-# ================= SERIAL =================
-ser = serial.Serial('/dev/ttyACM0', 115200)  # Pi port
+ser = serial.Serial('/dev/ttyACM0', 115200)
 time.sleep(2)
 
-# ================= ARUCO =================
 aruco = cv2.aruco
 dictionary = aruco.getPredefinedDictionary(aruco.DICT_4X4_50)
 
-# ================= CAMERA =================
 cap = cv2.VideoCapture(0)
 
-if not cap.isOpened():
-    print("❌ Camera not opened")
-    exit()
-else:
-    print("✅ Camera opened")
-
-TURN_THRESHOLD = 50
+TURN_THRESHOLD = 60
 STOP_AREA = 40000
 
 last_command = ""
@@ -41,36 +32,37 @@ while True:
 
     cv2.line(frame, (frame_center, 0), (frame_center, h), (0,255,255), 2)
 
-    # 🔥 OLD VERSION COMPATIBLE
     corners, ids, _ = cv2.aruco.detectMarkers(frame, dictionary)
 
     if ids is not None and len(corners) > 0:
-
         c = corners[0][0]
 
-        cx = int(c[:,0].mean())
-        cy = int(c[:,1].mean())
-
-        cv2.aruco.drawDetectedMarkers(frame, corners, ids)
-        cv2.circle(frame, (cx, cy), 6, (255,0,0), -1)
-
-        error = cx - frame_center
+        cx = int(c[:, 0].mean())
         area = cv2.contourArea(c)
 
-        cv2.putText(frame, f"Error: {error}", (10,30),
+        error = cx - frame_center
+
+        print("Error:", error, "Area:", area)
+
+        cv2.aruco.drawDetectedMarkers(frame, corners, ids)
+
+        cv2.putText(frame, f"Err:{error}", (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,255), 2)
 
-        if abs(error) > TURN_THRESHOLD:
-            if error > 0:
-                send("R")
-            else:
-                send("L")
+        cv2.putText(frame, f"Area:{int(area)}", (10, 60),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,255), 2)
 
-        elif area < STOP_AREA:
-            send("F")
+        # ✅ better logic
+        if area > STOP_AREA:
+            send("S")
 
         else:
-            send("S")
+            if error < -TURN_THRESHOLD:
+                send("L")
+            elif error > TURN_THRESHOLD:
+                send("R")
+            else:
+                send("F")
 
     else:
         send("S")
