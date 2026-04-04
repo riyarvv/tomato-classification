@@ -1,4 +1,4 @@
-from flask import Flask, Response, redirect, jsonify
+from flask import Flask, Response, jsonify
 import serial
 import threading
 import subprocess
@@ -9,12 +9,13 @@ app = Flask(__name__)
 # ================================
 # SERIAL CONNECTIONS
 # ================================
-
-# ESP32 → movement + count
 esp = serial.Serial('/dev/ttyACM0', 115200, timeout=1)
-
-# Arduino → arm control
 arduino = serial.Serial('/dev/ttyUSB0', 9600, timeout=1)
+
+# ================================
+# CAMERA INIT (STREAM INSIDE SERVER)
+# ================================
+cap = cv2.VideoCapture(0)
 
 # ================================
 # GLOBAL VARIABLES
@@ -36,6 +37,24 @@ def read_serial():
             if line.startswith("COUNT:"):
                 tomato_count = int(line.split(":")[1])
                 print("🍅 Updated Count:", tomato_count)
+
+# ================================
+# VIDEO STREAM GENERATOR
+# ================================
+def generate_frames():
+    while True:
+        success, frame = cap.read()
+        if not success:
+            break
+
+        # (optional) resize for speed
+        frame = cv2.resize(frame, (480, 320))
+
+        ret, buffer = cv2.imencode('.jpg', frame)
+        frame = buffer.tobytes()
+
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
 
 # ================================
 # CONTROL PAGE
@@ -112,11 +131,12 @@ setInterval(updateCount,1000)
 """
 
 # ================================
-# VIDEO STREAM (FROM YOUR STREAM SERVER)
+# VIDEO FEED (NOW LOCAL)
 # ================================
 @app.route('/video_feed')
 def video_feed():
-    return redirect("http://10.215.117.125:5002/video_feed")
+    return Response(generate_frames(),
+                    mimetype='multipart/x-mixed-replace; boundary=frame')
 
 # ================================
 # COUNT ROUTES
@@ -144,7 +164,7 @@ def reset():
     return {"status": "reset"}
 
 # ================================
-# START HARVESTING (RUN DETECTION)
+# START HARVESTING
 # ================================
 @app.route('/pick')
 def pick():
