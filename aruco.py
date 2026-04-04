@@ -3,36 +3,29 @@ import serial
 import time
 
 # ================= SERIAL =================
-ser = serial.Serial('/dev/ttyACM0', 115200)   # change if needed
+ser = serial.Serial('/dev/ttyACM0', 115200)  # Pi port
 time.sleep(2)
 
 # ================= ARUCO =================
 aruco = cv2.aruco
 dictionary = aruco.getPredefinedDictionary(aruco.DICT_4X4_50)
-detector = aruco.ArucoDetector(dictionary)
 
 # ================= CAMERA =================
 cap = cv2.VideoCapture(0)
 
-# ================= SETTINGS =================
 TURN_THRESHOLD = 50
 STOP_AREA = 12000
 
-last_command = ""   # 🔥 prevents jitter
+last_command = ""
 
-# ================= SEND =================
 def send(cmd):
     global last_command
-
-    # 🔥 only send if command changed
     if cmd != last_command:
         ser.write((cmd + "\n").encode())
         print("Sent:", cmd)
         last_command = cmd
 
-# ================= MAIN LOOP =================
 while True:
-
     ret, frame = cap.read()
     if not ret:
         break
@@ -40,50 +33,41 @@ while True:
     h, w = frame.shape[:2]
     frame_center = w // 2
 
-    # draw center line
     cv2.line(frame, (frame_center, 0), (frame_center, h), (0,255,255), 2)
 
-    # detect marker
-    corners, ids, _ = detector.detectMarkers(frame)
+    # 🔥 OLD VERSION COMPATIBLE
+    corners, ids, _ = cv2.aruco.detectMarkers(frame, dictionary)
 
-    if ids is not None:
+    if ids is not None and len(corners) > 0:
 
         c = corners[0][0]
 
-        # center of marker
         cx = int(c[:,0].mean())
         cy = int(c[:,1].mean())
 
         cv2.aruco.drawDetectedMarkers(frame, corners, ids)
         cv2.circle(frame, (cx, cy), 6, (255,0,0), -1)
 
-        # ================= CALCULATE =================
         error = cx - frame_center
         area = cv2.contourArea(c)
 
-        # display info
         cv2.putText(frame, f"Error: {error}", (10,30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,255,255), 2)
 
-        cv2.putText(frame, f"Area: {int(area)}", (10,60),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,255,0), 2)
-
-        # ================= CONTROL =================
         if abs(error) > TURN_THRESHOLD:
-
             if error > 0:
-                send("R")   # RIGHT
+                send("R")
             else:
-                send("L")   # LEFT
+                send("L")
 
         elif area < STOP_AREA:
-            send("F")       # FORWARD
+            send("F")
 
         else:
-            send("S")       # STOP (reached)
+            send("S")
 
     else:
-        send("S")  # no marker → stop
+        send("S")
 
     cv2.imshow("Aruco Navigation", frame)
 
