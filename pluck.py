@@ -39,8 +39,8 @@ HOME = (155, 5, 60)
 current_pose = HOME
 
 # ================= GRIPPER =================
-GRIP_CLOSE_SEQ = [100, 90, 75, 60, 45, 30, 15]
-GRIP_OPEN_SEQ = [30, 45, 60, 75, 90, 100]
+GRIP_CLOSE_SEQ = [80, 75, 60, 45, 30, 15]
+GRIP_OPEN_SEQ = [30, 45, 60, 75, 80]
 
 CONF = 0.4
 RIPE_CLASS_ID = 2
