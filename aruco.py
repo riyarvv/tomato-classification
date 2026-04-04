@@ -3,7 +3,7 @@ import serial
 import time
 
 # ================= SERIAL =================
-ser = serial.Serial('/dev/ttyUSB0', 115200)   # change if needed
+ser = serial.Serial('/dev/ttyACM0', 115200)   # change if needed
 time.sleep(2)
 
 # ================= ARUCO =================
