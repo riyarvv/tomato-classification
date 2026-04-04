@@ -9,12 +9,13 @@ import threading
 
 stream_app = Flask(__name__)
 latest_frame = None
+frame_lock = threading.Lock()
 
 # ================= SERIAL =================
 ser = serial.Serial('/dev/ttyUSB0', 9600, timeout=1)
 time.sleep(2)
 
-# ================= MODEL (TFLITE) =================
+# ================= MODEL =================
 interpreter = Interpreter(model_path="best_float16.tflite")
 interpreter.allocate_tensors()
 
@@ -26,7 +27,6 @@ input_w = input_details[0]['shape'][2]
 
 # ================= BASE SETTINGS =================
 BASE_MIN, BASE_MAX = 5, 160
-FRAME_CENTER = 305
 BASE_HOME = 20
 
 base_angle = BASE_HOME
@@ -61,7 +61,7 @@ def send_grip(g):
     ser.write(f"G,{g}\n".encode())
     print("Gripper:", g)
 
-# ================= SLOW SMOOTH MOVE =================
+# ================= SMOOTH MOVE =================
 def smooth_move(start, end, steps=8, delay=0.08):
     s1, e1, p1 = start
     s2, e2, p2 = end
@@ -74,7 +74,7 @@ def smooth_move(start, end, steps=8, delay=0.08):
         send_pose(s, e, p)
         time.sleep(delay)
 
-# ================= SMART PICK HEIGHT =================
+# ================= SMART PICK =================
 def get_smart_pick_pose(dist, cy, frame_h):
     if dist > 25:
         s, e, p = POSES["FAR"]
@@ -94,52 +94,61 @@ def get_smart_pick_pose(dist, cy, frame_h):
 
     return (s, e, p)
 
-# ================= ULTRASONIC =================
+# ================= DISTANCE =================
 def get_distance():
-    if ser.in_waiting:
-        try:
-            return float(ser.readline().decode().strip())
-        except:
-            return None
+    try:
+        if ser.in_waiting:
+            line = ser.readline().decode().strip()
+            return float(line)
+    except:
+        return None
     return None
 
 # ================= CAMERA =================
 cap = cv2.VideoCapture(0)
-latest_frame = None
 
+if not cap.isOpened():
+    print("Camera failed ❌")
+    exit()
+
+# ================= STREAM =================
 def generate():
     global latest_frame
 
     while True:
         if latest_frame is None:
+            time.sleep(0.01)   # ✅ FIX CPU
             continue
 
-        _, buffer = cv2.imencode('.jpg', latest_frame)
+        with frame_lock:
+            frame_copy = latest_frame.copy()
+
+        _, buffer = cv2.imencode('.jpg', frame_copy)
         frame = buffer.tobytes()
 
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+
 @stream_app.route('/video_feed')
 def video_feed():
     return Response(generate(),
         mimetype='multipart/x-mixed-replace; boundary=frame')
 
-if not cap.isOpened():
-    print("Camera failed ❌")
-    exit()
 def run_stream():
     stream_app.run(host='0.0.0.0', port=5002, use_reloader=False)
 
 threading.Thread(target=run_stream, daemon=True).start()
 
+# ================= MAIN LOOP =================
 while True:
     ret, frame = cap.read()
     if not ret:
         break
 
     orig_h, orig_w = frame.shape[:2]
+    FRAME_CENTER = orig_w // 2   # ✅ FIXED
 
-    # ================= TFLITE INFERENCE =================
+    # ================= INFERENCE =================
     img = cv2.resize(frame, (input_w, input_h))
     img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     img = img.astype(np.float32) / 255.0
@@ -148,14 +157,9 @@ while True:
     interpreter.set_tensor(input_details[0]['index'], img)
     interpreter.invoke()
 
-    output = interpreter.get_tensor(output_details[0]['index'])[0]
-    output = output.T
+    output = interpreter.get_tensor(output_details[0]['index'])[0].T
 
-    found = False
-
-    boxes = []
-    scores = []
-    centers = []
+    boxes, scores, centers = [], [], []
 
     for pred in output:
         x, y, w, h = pred[:4]
@@ -187,7 +191,6 @@ while True:
 
         error = cx - FRAME_CENTER
 
-        # ================= CENTER BASE =================
         if abs(error) > 30:
             base_angle -= int(error * 0.02)
             base_angle = max(BASE_MIN, min(BASE_MAX, base_angle))
@@ -195,54 +198,37 @@ while True:
             time.sleep(0.05)
 
         else:
-            print("CENTERED ✅")
             centered = True
             time.sleep(0.2)
 
-        # ================= PICK =================
         if centered:
             dist = get_distance()
 
             if dist is not None:
-                target = get_smart_pick_pose(
-                    dist, cy, frame.shape[0]
-                )
+                target = get_smart_pick_pose(dist, cy, frame.shape[0])
 
                 smooth_move(current_pose, target)
 
                 for g in GRIP_CLOSE_SEQ:
-                  send_grip(g)
-                  time.sleep(0.2)
-              
-                  # 🍅 COUNT TRIGGER
-                  if g == 30:
-                      try:
-                          requests.get("http://10.215.117.125:5001/increment")
-                          print("🍅 Count increment sent")
-                      except:
-                          print("⚠️ Server not reachable")
+                    send_grip(g)
+                    time.sleep(0.2)
 
-                print("GRIPPED 🍅")
+                    if g == 30:
+                        try:
+                            requests.get("http://localhost:5001/increment")  # ✅ FIXED IP
+                        except:
+                            pass
 
-                detach = (
-                    max(95, target[0] - 2),
-                    target[1],
-                    target[2]
-                )
+                detach = (max(95, target[0]-2), target[1], target[2])
 
                 smooth_move(target, detach)
-
                 smooth_move(detach, HOME)
 
-                # base return
-                if base_angle > BASE_HOME:
-                    for angle in range(base_angle, BASE_HOME, -2):
-                        send_base(angle)
-                        time.sleep(0.08)
-                else:
-                    for angle in range(base_angle, BASE_HOME, 2):
-                        send_base(angle)
-                        time.sleep(0.08)
+                # return base
+                step = -2 if base_angle > BASE_HOME else 2
+                for angle in range(base_angle, BASE_HOME, step):
+                    send_base(angle)
+                    time.sleep(0.08)
 
                 base_angle = BASE_HOME
 
@@ -250,15 +236,10 @@ while True:
                     send_grip(g)
                     time.sleep(0.2)
 
-                print("DROPPED IN CART ✅")
-
                 centered = False
                 time.sleep(1)
 
-        found = True
-
     else:
-        # ================= SCAN =================
         base_angle += scan_dir * 2
 
         if base_angle >= BASE_MAX or base_angle <= BASE_MIN:
@@ -268,7 +249,10 @@ while True:
         send_base(base_angle)
         time.sleep(0.08)
 
-    latest_frame = frame.copy()
+    # ✅ THREAD SAFE FRAME UPDATE
+    with frame_lock:
+        latest_frame = frame.copy()
+
     cv2.imshow("Tomato Robot FINAL SLOW", frame)
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -276,3 +260,4 @@ while True:
 
 cap.release()
 cv2.destroyAllWindows()
+ser.close()
