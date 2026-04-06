@@ -58,8 +58,8 @@ def send_pose(s, e, p):
 def send_grip(g):
     ser.write(f"G,{g}\n".encode())
 
-# ================= SMOOTH MOVE =================
-def smooth_move(start, end, steps=8, delay=0.08):
+# ================= SMOOTH MOVE (SLOWED) =================
+def smooth_move(start, end, steps=12, delay=0.12):  # slower & smoother
     s1, e1, p1 = start
     s2, e2, p2 = end
 
@@ -101,7 +101,7 @@ def get_distance():
         return None
     return None
 
-# ================= CAMERA (MATCH scan_pick) =================
+# ================= CAMERA =================
 cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
 
 cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
@@ -127,10 +127,8 @@ def generate():
                 time.sleep(0.01)
                 continue
 
-            ret, buffer = cv2.imencode(
-                '.jpg', output_frame,
-                [int(cv2.IMWRITE_JPEG_QUALITY), 80]
-            )
+            ret, buffer = cv2.imencode('.jpg', output_frame,
+                                       [int(cv2.IMWRITE_JPEG_QUALITY), 80])
             frame = buffer.tobytes()
 
         yield (b'--frame\r\n'
@@ -156,7 +154,6 @@ while True:
 
     frame_count += 1
 
-    # 🔥 Skip more frames → BIG lag reduction
     if frame_count % 4 != 0:
         with lock:
             output_frame = frame.copy()
@@ -201,7 +198,6 @@ while True:
             scores.append(float(confidence))
             centers.append((cx, cy))
 
-    # ================= NMS (IMPORTANT) =================
     indices = cv2.dnn.NMSBoxes(boxes, scores, CONF, 0.45)
 
     valid_centers = []
@@ -214,16 +210,10 @@ while True:
 
             valid_centers.append((cx, cy))
 
-            # ✅ DRAW BOX
             cv2.rectangle(frame, (x, y), (x + w, y + h), (0,255,0), 2)
-
-            # ✅ LABEL (Ripe + Confidence)
             label = f"Ripe {conf:.2f}"
-            cv2.putText(frame, label,
-                        (x, y - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.6, (0,255,0), 2)
-
+            cv2.putText(frame, label, (x, y - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
             cv2.circle(frame, (cx, cy), 5, (0,255,0), -1)
 
     # ================= ROBOT CONTROL =================
@@ -245,34 +235,34 @@ while True:
                 target = get_smart_pick_pose(dist, cy, frame.shape[0])
 
                 smooth_move(current_pose, target)
+                time.sleep(0.2)
 
                 for g in GRIP_CLOSE_SEQ:
                     send_grip(g)
-
-                    # 🍅 COUNT TRIGGER
                     if g == 30:
                         try:
                             requests.get("http://localhost:5001/increment", timeout=0.2)
                         except:
                             pass
-
-                    time.sleep(0.15)   # 🔥 reduced delay
+                    time.sleep(0.3)
 
                 detach = (max(95, target[0]-2), target[1], target[2])
 
                 smooth_move(target, detach)
+                time.sleep(0.2)
                 smooth_move(detach, HOME)
+                time.sleep(0.2)
 
-                # return base
                 step = -2 if base_angle > BASE_HOME else 2
                 for angle in range(base_angle, BASE_HOME, step):
                     send_base(angle)
+                    time.sleep(0.05)
 
                 base_angle = BASE_HOME
 
                 for g in GRIP_OPEN_SEQ:
                     send_grip(g)
-                    time.sleep(0.15)
+                    time.sleep(0.3)
 
                 centered = False
                 time.sleep(0.5)
