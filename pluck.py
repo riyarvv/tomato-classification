@@ -25,7 +25,7 @@ input_w = input_details[0]['shape'][2]
 
 # ================= BASE SETTINGS =================
 BASE_MIN, BASE_MAX = 5, 160
-BASE_HOME = 20
+BASE_HOME = 10
 
 base_angle = BASE_HOME
 scan_dir = 1
