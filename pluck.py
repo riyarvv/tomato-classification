@@ -87,7 +87,7 @@ def get_smart_pick_pose(dist, cy, frame_h):
     s = s - shoulder_offset
 
     s += 5
-    s = max(90, min(150, s))
+    s = max(100, min(150, s))
 
     return (s, e, p)
 
