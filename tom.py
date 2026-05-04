@@ -9,7 +9,10 @@ from tflite_runtime.interpreter import Interpreter
 # 1. INITIALIZE HARDWARE 
 # ==========================================
 arduino_port = '/dev/ttyUSB0'   # CHANGE back to /dev/ttyACM0 if needed!
-camera_index = 0
+camera_source = "http://127.0.0.1:5001/video_feed"
+
+print("Connecting to Camera Stream...")
+cap = cv2.VideoCapture(camera_source)
 
 print("Connecting to Arduino...")
 try:
@@ -21,10 +24,10 @@ except Exception as e:
     print(f"Error: Could not connect to Arduino. {e}")
     exit()
 
-print("Initializing Camera...")
-cap = cv2.VideoCapture(camera_index, cv2.CAP_V4L2)
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+# print("Initializing Camera...")
+# cap = cv2.VideoCapture(camera_index, cv2.CAP_V4L2)
+# cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+# cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
 if not cap.isOpened():
     print("Error: Could not open camera.")
@@ -224,7 +227,7 @@ while cap.isOpened():
             last_pick_time = time.time()
             print(">>> Waiting 25 seconds for the Arduino to finish its sequence...\n")
 
-    cv2.imshow("Tomato Detection (TFLite Pi)", frame)
+    # cv2.imshow("Tomato Detection (TFLite Pi)", frame)
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
