@@ -88,27 +88,37 @@ def preprocess(frame):
 # ==========================================
 # 6. POSTPROCESS (YOLO TFLite)
 # ==========================================
-def postprocess(output, frame_w, frame_h, conf_threshold=0.8):
+def postprocess(output, frame_w, frame_h, conf_threshold=0.5):
     detections = []
+    
+    # 1. Remove the batch dimension (1, 7, 8400) -> (7, 8400)
     output = np.squeeze(output)
+    
+    # 2. Transpose the matrix (7, 8400) -> (8400, 7)
+    output = output.T
 
     for det in output:
-        if len(det) < 6:
-            continue
-
-        x, y, w, h, conf, cls = det[:6]
+        # Index 4 is usually the confidence/objectness score
+        conf = det[4]
 
         if conf < conf_threshold:
             continue
 
-        x = x * frame_w
-        y = y * frame_h
+        # Get the coordinates (normalized 0.0 to 1.0)
+        # Depending on your model, these might be center_x, center_y
+        x_center = det[0] * frame_w
+        y_center = det[1] * frame_h
+        
+        # Determine the class with the highest score (from index 5 and 6)
+        # This finds if class 0 or class 1 has the higher probability
+        class_scores = det[5:]
+        class_id = np.argmax(class_scores)
 
         detections.append({
-            "x": x,
-            "y": y,
+            "x": x_center,
+            "y": y_center,
             "conf": conf,
-            "class": int(cls)
+            "class": int(class_id)
         })
 
     return detections
