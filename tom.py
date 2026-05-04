@@ -139,10 +139,13 @@ while cap.isOpened():
 
     # -------- INFERENCE --------
     input_data = preprocess(frame)
-
+    print("thinking")
     interpreter.set_tensor(input_details[0]['index'], input_data)
     interpreter.invoke()
+    print("done thinking")
     output_data = interpreter.get_tensor(output_details[0]['index'])
+
+    print(f"Output shape: {output_data.shape}")
 
     detections = postprocess(output_data, frame_w, frame_h)
 
