@@ -10,7 +10,7 @@ app = Flask(__name__)
 # SERIAL CONNECTIONS
 # ================================
 esp = serial.Serial('/dev/ttyACM0', 115200, timeout=1)
-arduino = serial.Serial('/dev/ttyUSB0', 9600, timeout=1)
+#arduino = serial.Serial('/dev/ttyUSB0', 9600, timeout=1)
 
 # ================================
 # CAMERA INIT (STREAM INSIDE SERVER)
