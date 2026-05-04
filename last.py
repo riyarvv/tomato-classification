@@ -33,7 +33,7 @@ if not cap.isOpened():
 # 2. LOAD TFLITE MODEL
 # ==========================================
 print("Loading TFLite model...")
-interpreter = Interpreter(model_path="best.tflite")
+interpreter = Interpreter(model_path="best_float16.tflite")
 interpreter.allocate_tensors()
 
 input_details = interpreter.get_input_details()
