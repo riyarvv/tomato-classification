@@ -17,7 +17,7 @@ esp = serial.Serial('/dev/ttyACM0', 115200, timeout=1)
 # ================================
 camera = cv2.VideoCapture(0, cv2.CAP_V4L2)
 camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640) # Lower res for faster web streaming
-camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480
+camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
 # ================================
 # GLOBAL VARIABLES
