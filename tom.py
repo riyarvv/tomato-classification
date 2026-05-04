@@ -86,43 +86,49 @@ def preprocess(frame):
     return img
 
 # ==========================================
-# 6. POSTPROCESS (YOLO TFLite)
+# 6. POSTPROCESS (YOLOv8 TFLite Fix)
 # ==========================================
 def postprocess(output, frame_w, frame_h, conf_threshold=0.5):
     detections = []
     
-    # 1. Remove the batch dimension (1, 7, 8400) -> (7, 8400)
-    output = np.squeeze(output)
-    
-    # 2. Transpose the matrix (7, 8400) -> (8400, 7)
-    output = output.T
+    # Remove batch and transpose: (1, 7, 8400) -> (8400, 7)
+    output = np.squeeze(output).T
 
     for det in output:
-        # Index 4 is usually the confidence/objectness score
-        conf = det[4]
+        # Indices 0, 1, 2, 3 are x, y, w, h
+        x_center, y_center, w, h = det[:4]
+        
+        # Indices 4, 5, 6 are the actual class probabilities
+        class_probs = det[4:] 
+        
+        class_id = np.argmax(class_probs)
+        conf = class_probs[class_id]
 
         if conf < conf_threshold:
             continue
 
-        # Get the coordinates (normalized 0.0 to 1.0)
-        # Depending on your model, these might be center_x, center_y
-        x_center = det[0] * frame_w
-        y_center = det[1] * frame_h
-        
-        # Determine the class with the highest score (from index 5 and 6)
-        # This finds if class 0 or class 1 has the higher probability
-        class_scores = det[5:]
-        class_id = np.argmax(class_scores)
+        # Convert normalized coordinates back to actual pixels
+        x_center = x_center * frame_w
+        y_center = y_center * frame_h
+        width = w * frame_w
+        height = h * frame_h
+
+        # Calculate top-left corner for drawing boxes later
+        x_min = int(x_center - (width / 2))
+        y_min = int(y_center - (height / 2))
 
         detections.append({
-            "x": x_center,
+            "x": x_center,  # Keep center for robot math
             "y": y_center,
-            "conf": conf,
+            "x_min": x_min, # Keep top-left for drawing
+            "y_min": y_min,
+            "w": int(width),
+            "h": int(height),
+            "conf": float(conf),
             "class": int(class_id)
         })
 
     return detections
-
 # ==========================================
 # 7. MAIN LOOP
 # ==========================================
@@ -163,8 +169,21 @@ while cap.isOpened():
 
     for det in detections:
         class_id = det["class"]
+        conf = det["conf"]
+        
+        # --- DRAWING THE BOXES ON THE SCREEN ---
+        # Draw a green rectangle around the detection
+        cv2.rectangle(frame, (det["x_min"], det["y_min"]), 
+                     (det["x_min"] + det["w"], det["y_min"] + det["h"]), 
+                     (0, 255, 0), 2)
+        
+        # Put the class ID and confidence above the box
+        label = f"Class {class_id}: {conf:.2f}"
+        cv2.putText(frame, label, (det["x_min"], det["y_min"] - 10), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        # ---------------------------------------
 
-        # 🔥 Adjust class ID if needed
+        # 🔥 Adjust class ID if needed (Assuming 0 is "Ripe")
         if class_id == 0 and (current_time - last_pick_time > 25):
 
             px_x = det["x"]
@@ -186,7 +205,6 @@ while cap.isOpened():
 
             last_pick_time = time.time()
             print(">>> Waiting 25 seconds...\n")
-
     cv2.imshow("Tomato Detection (TFLite Pi)", frame)
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
