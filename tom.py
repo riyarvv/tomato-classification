@@ -8,7 +8,7 @@ from tflite_runtime.interpreter import Interpreter
 # 1. INITIALIZE HARDWARE 
 # ==========================================
 arduino_port = '/dev/ttyUSB0'   # CHANGE if needed
-camera_index = 1
+camera_index = 0
 
 print("Connecting to Arduino...")
 try:
@@ -21,7 +21,7 @@ except Exception as e:
     exit()
 
 print("Initializing Camera...")
-cap = cv2.VideoCapture(camera_index)
+cap = cv2.VideoCapture(camera_index, cv2.CAP_V4L2)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 
