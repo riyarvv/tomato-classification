@@ -7,7 +7,7 @@ from tflite_runtime.interpreter import Interpreter
 # ==========================================
 # 1. INITIALIZE HARDWARE 
 # ==========================================
-arduino_port = 'COM3'   # CHANGE if needed
+arduino_port = '/dev/ttyUSB0'   # CHANGE if needed
 camera_index = 0
 
 print("Connecting to Arduino...")
