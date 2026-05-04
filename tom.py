@@ -184,7 +184,7 @@ while cap.isOpened():
         # ---------------------------------------
 
         # 🔥 Adjust class ID if needed (Assuming 0 is "Ripe")
-        if class_id == 0 and (current_time - last_pick_time > 25):
+        if class_id == 2 and (current_time - last_pick_time > 25):
 
             px_x = det["x"]
             px_y = det["y"]
