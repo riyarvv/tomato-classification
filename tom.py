@@ -216,7 +216,7 @@ while cap.isOpened():
             # --- ADD THESE TWO LINES ---
             # Tell the Flask server to update the web UI and OLED!
             try:
-                requests.get("http://127.0.0.1:5001/increment", timeout=1)
+                requests.get("http://10.215.117.125:5001/increment", timeout=1)
             except:
                 print("Failed to update counter on server")
             # ---------------------------
