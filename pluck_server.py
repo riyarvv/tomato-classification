@@ -13,8 +13,11 @@ esp = serial.Serial('/dev/ttyACM0', 115200, timeout=1)
 #arduino = serial.Serial('/dev/ttyUSB0', 9600, timeout=1)
 
 # ================================
-# CAMERA INIT (STREAM INSIDE SERVER)
+# CAMERA INIT (Add this)
 # ================================
+camera = cv2.VideoCapture(0, cv2.CAP_V4L2)
+camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640) # Lower res for faster web streaming
+camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480
 
 # ================================
 # GLOBAL VARIABLES
@@ -38,8 +41,18 @@ def read_serial():
                 print("🍅 Updated Count:", tomato_count)
 
 # ================================
-# VIDEO STREAM GENERATOR
+# VIDEO STREAM GENERATOR (Add this)
 # ================================
+def gen_frames():
+    while True:
+        success, frame = camera.read()
+        if not success:
+            break
+        else:
+            ret, buffer = cv2.imencode('.jpg', frame)
+            frame_bytes = buffer.tobytes()
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
 
 
 # ================================
@@ -693,7 +706,7 @@ def control():
 # ================================
 @app.route('/video_feed')
 def video_feed():
-    return redirect("http://10.215.117.125:5002/video_feed")
+    return Response(gen_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 # ================================
 # COUNT ROUTES
