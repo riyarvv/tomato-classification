@@ -2,6 +2,7 @@ import serial
 import time
 import cv2
 import numpy as np
+import requests
 from tflite_runtime.interpreter import Interpreter
 
 # ==========================================
@@ -212,6 +213,13 @@ while cap.isOpened():
 
             arduino.write(command.encode())
             arduino.flush()
+            # --- ADD THESE TWO LINES ---
+            # Tell the Flask server to update the web UI and OLED!
+            try:
+                requests.get("http://127.0.0.1:5001/increment", timeout=1)
+            except:
+                print("Failed to update counter on server")
+            # ---------------------------
 
             last_pick_time = time.time()
             print(">>> Waiting 25 seconds for the Arduino to finish its sequence...\n")
